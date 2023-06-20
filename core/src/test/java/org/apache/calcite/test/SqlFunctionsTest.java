@@ -15,12 +15,13 @@
  * limitations under the License.
  */
 package org.apache.calcite.test;
-
 import org.apache.calcite.avatica.util.ByteString;
 import org.apache.calcite.avatica.util.DateTimeUtils;
 import org.apache.calcite.runtime.CalciteException;
 import org.apache.calcite.runtime.SqlFunctions;
 import org.apache.calcite.runtime.Utilities;
+
+import com.google.common.collect.ImmutableList;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +42,9 @@ import static org.apache.calcite.avatica.util.DateTimeUtils.timeStringToUnixDate
 import static org.apache.calcite.avatica.util.DateTimeUtils.timestampStringToUnixDate;
 import static org.apache.calcite.runtime.SqlFunctions.charLength;
 import static org.apache.calcite.runtime.SqlFunctions.concat;
+import static org.apache.calcite.runtime.SqlFunctions.concatMulti;
+import static org.apache.calcite.runtime.SqlFunctions.concatMultiWithNull;
+import static org.apache.calcite.runtime.SqlFunctions.concatWithNull;
 import static org.apache.calcite.runtime.SqlFunctions.fromBase64;
 import static org.apache.calcite.runtime.SqlFunctions.greater;
 import static org.apache.calcite.runtime.SqlFunctions.initcap;
@@ -51,11 +55,15 @@ import static org.apache.calcite.runtime.SqlFunctions.lesser;
 import static org.apache.calcite.runtime.SqlFunctions.lower;
 import static org.apache.calcite.runtime.SqlFunctions.ltrim;
 import static org.apache.calcite.runtime.SqlFunctions.md5;
+import static org.apache.calcite.runtime.SqlFunctions.position;
 import static org.apache.calcite.runtime.SqlFunctions.posixRegex;
 import static org.apache.calcite.runtime.SqlFunctions.regexpReplace;
 import static org.apache.calcite.runtime.SqlFunctions.rtrim;
 import static org.apache.calcite.runtime.SqlFunctions.sha1;
+import static org.apache.calcite.runtime.SqlFunctions.sha256;
+import static org.apache.calcite.runtime.SqlFunctions.sha512;
 import static org.apache.calcite.runtime.SqlFunctions.toBase64;
+import static org.apache.calcite.runtime.SqlFunctions.toChar;
 import static org.apache.calcite.runtime.SqlFunctions.toInt;
 import static org.apache.calcite.runtime.SqlFunctions.toIntOptional;
 import static org.apache.calcite.runtime.SqlFunctions.toLong;
@@ -68,6 +76,7 @@ import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasToString;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -81,6 +90,14 @@ import static java.nio.charset.StandardCharsets.UTF_8;
  * rather than {@code assertEquals}.
  */
 class SqlFunctionsTest {
+  static <E> List<E> list(E... es) {
+    return Arrays.asList(es);
+  }
+
+  static <E> List<E> list() {
+    return ImmutableList.of();
+  }
+
   @Test void testCharLength() {
     assertThat(charLength("xyz"), is(3));
   }
@@ -122,6 +139,35 @@ class SqlFunctionsTest {
     assertThat(concat("a", null), is("anull"));
     assertThat(concat((String) null, null), is("nullnull"));
     assertThat(concat(null, "b"), is("nullb"));
+  }
+
+  @Test void testConcatWithNull() {
+    assertThat(concatWithNull("a b", "cd"), is("a bcd"));
+    // Null value could be passed in. If we pass one null value,
+    // it is treated like empty string, if both values are null, returns null.
+    // As the following tests show.
+    assertThat(concatWithNull("a", null), is("a"));
+    assertThat(concatWithNull(null, null), is(nullValue()));
+    assertThat(concatWithNull(null, "b"), is("b"));
+  }
+
+  @Test void testConcatMulti() {
+    assertThat(concatMulti("a b", "cd", "e"), is("a bcde"));
+    // The code generator will ensure that nulls are never passed in. If we
+    // pass in null, it is treated like the string "null", as the following
+    // tests show. Not the desired behavior for SQL.
+    assertThat(concatMulti((String) null), is("null"));
+    assertThat(concatMulti((String) null, null), is("nullnull"));
+    assertThat(concatMulti("a", null, "b"), is("anullb"));
+  }
+
+  @Test void testConcatMultiWithNull() {
+    assertThat(concatMultiWithNull("a b", "cd", "e"), is("a bcde"));
+    // Null value could be passed in which is treated as empty string
+    assertThat(concatMultiWithNull((String) null), is(""));
+    assertThat(concatMultiWithNull((String) null, ""), is(""));
+    assertThat(concatMultiWithNull((String) null, null, null), is(""));
+    assertThat(concatMultiWithNull("a", null, "b"), is("ab"));
   }
 
   @Test void testPosixRegex() {
@@ -507,30 +553,88 @@ class SqlFunctionsTest {
     assertThat(SqlFunctions.sround(-12000, -5), within(0d, 0.001));
   }
 
+  @Test void testSplit() {
+    assertThat("no occurrence of delimiter",
+        SqlFunctions.split("abc", ","), is(list("abc")));
+    assertThat("delimiter in middle",
+        SqlFunctions.split("abc", "b"), is(list("a", "c")));
+    assertThat("delimiter at end",
+        SqlFunctions.split("abc", "c"), is(list("ab", "")));
+    assertThat("delimiter at start",
+        SqlFunctions.split("abc", "a"), is(list("", "bc")));
+    assertThat("empty delimiter",
+        SqlFunctions.split("abc", ""), is(list("abc")));
+    assertThat("empty delimiter and string",
+        SqlFunctions.split("", ""), is(list()));
+    assertThat("empty string",
+        SqlFunctions.split("", ","), is(list()));
+    assertThat("long delimiter (occurs at start)",
+        SqlFunctions.split("abracadabra", "ab"), is(list("", "racad", "ra")));
+    assertThat("long delimiter (occurs at end)",
+        SqlFunctions.split("sabracadabrab", "ab"),
+        is(list("s", "racad", "r", "")));
+
+    // Same as above but for ByteString
+    final ByteString a = ByteString.of("aa", 16);
+    final ByteString ab = ByteString.of("aabb", 16);
+    final ByteString abc = ByteString.of("aabbcc", 16);
+    final ByteString abracadabra = ByteString.of("aabb44aaccaaddaabb44aa", 16);
+    final ByteString b = ByteString.of("bb", 16);
+    final ByteString bc = ByteString.of("bbcc", 16);
+    final ByteString c = ByteString.of("cc", 16);
+    final ByteString f = ByteString.of("ff", 16);
+    final ByteString r = ByteString.of("44", 16);
+    final ByteString ra = ByteString.of("44aa", 16);
+    final ByteString racad = ByteString.of("44aaccaadd", 16);
+    final ByteString empty = ByteString.of("", 16);
+    final ByteString s = ByteString.of("55", 16);
+    final ByteString sabracadabrab =
+        ByteString.of("55", 16).concat(abracadabra).concat(b);
+    assertThat("no occurrence of delimiter",
+        SqlFunctions.split(abc, f), is(list(abc)));
+    assertThat("delimiter in middle",
+        SqlFunctions.split(abc, b), is(list(a, c)));
+    assertThat("delimiter at end",
+        SqlFunctions.split(abc, c), is(list(ab, empty)));
+    assertThat("delimiter at start",
+        SqlFunctions.split(abc, a), is(list(empty, bc)));
+    assertThat("empty delimiter",
+        SqlFunctions.split(abc, empty), is(list(abc)));
+    assertThat("empty delimiter and string",
+        SqlFunctions.split(empty, empty), is(list()));
+    assertThat("empty string",
+        SqlFunctions.split(empty, f), is(list()));
+    assertThat("long delimiter (occurs at start)",
+        SqlFunctions.split(abracadabra, ab), is(list(empty, racad, ra)));
+    assertThat("long delimiter (occurs at end)",
+        SqlFunctions.split(sabracadabrab, ab),
+        is(list(s, racad, r, empty)));
+  }
+
   @Test void testByteString() {
     final byte[] bytes = {(byte) 0xAB, (byte) 0xFF};
     final ByteString byteString = new ByteString(bytes);
     assertThat(byteString.length(), is(2));
-    assertThat(byteString.toString(), is("abff"));
+    assertThat(byteString, hasToString("abff"));
     assertThat(byteString.toString(16), is("abff"));
     assertThat(byteString.toString(2), is("1010101111111111"));
 
     final ByteString emptyByteString = new ByteString(new byte[0]);
     assertThat(emptyByteString.length(), is(0));
-    assertThat(emptyByteString.toString(), is(""));
+    assertThat(emptyByteString, hasToString(""));
     assertThat(emptyByteString.toString(16), is(""));
     assertThat(emptyByteString.toString(2), is(""));
 
     assertThat(ByteString.EMPTY, is(emptyByteString));
 
-    assertThat(byteString.substring(1, 2).toString(), is("ff"));
-    assertThat(byteString.substring(0, 2).toString(), is("abff"));
-    assertThat(byteString.substring(2, 2).toString(), is(""));
+    assertThat(byteString.substring(1, 2), hasToString("ff"));
+    assertThat(byteString.substring(0, 2), hasToString("abff"));
+    assertThat(byteString.substring(2, 2), hasToString(""));
 
     // Add empty string, get original string back
     assertSame(byteString.concat(emptyByteString), byteString);
     final ByteString byteString1 = new ByteString(new byte[]{(byte) 12});
-    assertThat(byteString.concat(byteString1).toString(), is("abff0c"));
+    assertThat(byteString.concat(byteString1), hasToString("abff0c"));
 
     final byte[] bytes3 = {(byte) 0xFF};
     final ByteString byteString3 = new ByteString(bytes3);
@@ -946,6 +1050,98 @@ class SqlFunctionsTest {
     }
   }
 
+  @Test void testSha256() {
+    assertThat("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        is(sha256("")));
+    assertThat("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        is(sha256(ByteString.of("", 16))));
+    assertThat("a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+        is(sha256("Hello World")));
+    assertThat("a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e",
+        is(sha256(new ByteString("Hello World".getBytes(UTF_8)))));
+    try {
+      String o = sha256((String) null);
+      fail("Expected NPE, got " + o);
+    } catch (NullPointerException e) {
+      // ok
+    }
+  }
+
+  @Test void testSha512() {
+    assertThat("cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5"
+            + "d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+        is(sha512("")));
+    assertThat("cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5"
+            + "d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+        is(sha512(ByteString.of("", 16))));
+    assertThat("2c74fd17edafd80e8447b0d46741ee243b7eb74dd2149a0ab1b9246fb30382f27e853d858"
+            + "5719e0e67cbda0daa8f51671064615d645ae27acb15bfb1447f459b",
+        is(sha512("Hello World")));
+    assertThat("2c74fd17edafd80e8447b0d46741ee243b7eb74dd2149a0ab1b9246fb30382f27e853d858"
+            + "5719e0e67cbda0daa8f51671064615d645ae27acb15bfb1447f459b",
+        is(sha512(new ByteString("Hello World".getBytes(UTF_8)))));
+    try {
+      String o = sha512((String) null);
+      fail("Expected NPE, got " + o);
+    } catch (NullPointerException e) {
+      // ok
+    }
+  }
+
+  @Test void testPosition() {
+    assertThat(position("c", "abcdec"), is(3));
+    assertThat(position("c", "abcdec", 2), is(3));
+    assertThat(position("c", "abcdec", -2), is(3));
+    assertThat(position("c", "abcdec", 4), is(6));
+    assertThat(position("c", "abcdec", 1, 2), is(6));
+    assertThat(position("cde", "abcdecde", -2, 1), is(6));
+    assertThat(position("c", "abcdec", -1, 2), is(3));
+    assertThat(position("f", "abcdec", 1, 1), is(0));
+    assertThat(position("c", "abcdec", 1, 3), is(0));
+    try {
+      int i = position("c", "abcdec", 0, 1);
+      fail("expected error, got: " + i);
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid input for POSITION function: from operand value must not be zero"));
+    }
+    try {
+      int i = position("c", "abcdec", 1, 0);
+      fail("expected error, got: " + i);
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid input for POSITION function: occurrence operand value must be positive"));
+    }
+    final ByteString abcdec = ByteString.of("aabbccddeecc", 16);
+    final ByteString c = ByteString.of("cc", 16);
+    final ByteString dec = ByteString.of("ddeecc", 16);
+    final ByteString f = ByteString.of("ff", 16);
+    assertThat(position(c, abcdec), is(3));
+    assertThat(position(c, abcdec, 2), is(3));
+    assertThat(position(c, abcdec, -2), is(3));
+    assertThat(position(c, abcdec, 4), is(6));
+    assertThat(position(dec, abcdec, -2), is(4));
+    assertThat(position(c, abcdec, 1, 2), is(6));
+    assertThat(position(c, abcdec, -1, 2), is(3));
+    assertThat(position(f, abcdec, 1, 1), is(0));
+    assertThat(position(c, abcdec, 1, 3), is(0));
+    try {
+      int i = position(c, abcdec, 0, 1);
+      fail("expected error, got: " + i);
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid input for POSITION function: from operand value must not be zero"));
+    }
+    try {
+      int i = position(c, abcdec, 1, 0);
+      fail("expected error, got: " + i);
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid input for POSITION function: occurrence operand value must be positive"));
+    }
+  }
+
+
   /**
    * Tests that a date in the local time zone converts to a Unix timestamp in
    * UTC.
@@ -1213,6 +1409,34 @@ class SqlFunctionsTest {
   @Test void testInternalToTime() {
     assertThat(internalToTime(0), is(Time.valueOf("00:00:00")));
     assertThat(internalToTime(86399000), is(Time.valueOf("23:59:59")));
+  }
+
+  /**
+   * Tests that timestamp can be converted to a string given a custom pattern.
+   */
+  @Test void testToChar() {
+    String pattern1 = "YYYY-MM-DD HH24:MI:SS.MS";
+    String pattern2 = "Day, DD HH12:MI:SS";
+
+    assertThat(
+        toChar(0, pattern1),
+        is("1970-01-01 00:00:00.000"));
+
+    assertThat(
+        toChar(0, pattern2),
+        is("Thursday, 01 12:00:00"));
+
+    assertThat(
+        toChar(timestampStringToUnixDate("2014-09-30 15:28:27.356"), pattern1),
+        is("2014-09-30 15:28:27.356"));
+
+    assertThat(
+        toChar(timestampStringToUnixDate("2014-09-30 15:28:27.356"), pattern2),
+        is("Tuesday, 30 03:28:27"));
+
+    assertThat(
+        toChar(timestampStringToUnixDate("1500-04-30 12:00:00.123"), pattern1),
+        is("1500-04-30 12:00:00.123"));
   }
 
   /**

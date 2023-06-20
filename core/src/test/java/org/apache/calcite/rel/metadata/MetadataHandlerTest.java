@@ -20,9 +20,9 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 
+import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.emptyArray;
-import static org.hamcrest.Matchers.is;
 
 /**
  * Tests for {@link MetadataHandler}.
@@ -36,21 +36,24 @@ class MetadataHandlerTest {
   }
 
   @Test void getDefMethodInHandlerIsIgnored() {
-    Method[] methods = MetadataHandler.handlerMethods(
-        MetadataHandlerWithGetDefMethodOnly.class);
+    Method[] methods =
+        MetadataHandler.handlerMethods(
+            MetadataHandlerWithGetDefMethodOnly.class);
 
     assertThat(methods, is(emptyArray()));
   }
 
   @Test void staticMethodInHandlerIsIgnored() {
-    Method[] methods = MetadataHandler.handlerMethods(MetadataHandlerWithStaticMethod.class);
+    Method[] methods =
+        MetadataHandler.handlerMethods(MetadataHandlerWithStaticMethod.class);
 
     assertThat(methods, is(emptyArray()));
   }
 
   @Test void synthenticMethodInHandlerIsIgnored() {
-    Method[] methods = MetadataHandler.handlerMethods(
-        TestMetadataHandlers.handlerClassWithSyntheticMethod());
+    Method[] methods =
+        MetadataHandler.handlerMethods(
+            TestMetadataHandlers.handlerClassWithSyntheticMethod());
 
     assertThat(methods, is(emptyArray()));
   }

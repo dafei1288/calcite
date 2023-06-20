@@ -66,9 +66,9 @@ public abstract class SqlOperatorBinding {
    * GROUP BY deptno, gender", returns 2.
    *
    * <p>Returns 0 if the query is implicitly "GROUP BY ()" because of an
-   * aggregate expression. For example, "SELECT sum(sal) FROM emp".</p>
+   * aggregate expression. For example, "SELECT sum(sal) FROM emp".
    *
-   * <p>Returns -1 if the query is not an aggregate query.</p>
+   * <p>Returns -1 if the query is not an aggregate query.
    */
   public int getGroupCount() {
     return -1;
@@ -208,8 +208,15 @@ public abstract class SqlOperatorBinding {
             getOperandType(ordinal).getSqlTypeName());
   }
 
-  /** Returns the number of bound operands. */
+  /** Returns the number of bound operands.
+   * Includes pre-operands and regular operands. */
   public abstract int getOperandCount();
+
+  /** Returns the number of pre-operands.
+   * Zero except for a few aggregate functions. */
+  public int getPreOperandCount() {
+    return 0;
+  }
 
   /**
    * Gets the type of a bound operand.

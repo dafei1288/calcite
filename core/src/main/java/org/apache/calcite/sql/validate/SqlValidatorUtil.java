@@ -119,8 +119,8 @@ public class SqlValidatorUtil {
           requireNonNull(catalogReader, "catalogReader"), datasetName, usedDataset,
           tableNamespace.extendedFields);
     } else if (namespace.isWrapperFor(SqlValidatorImpl.DmlNamespace.class)) {
-      final SqlValidatorImpl.DmlNamespace dmlNamespace = namespace.unwrap(
-          SqlValidatorImpl.DmlNamespace.class);
+      final SqlValidatorImpl.DmlNamespace dmlNamespace =
+          namespace.unwrap(SqlValidatorImpl.DmlNamespace.class);
       final SqlValidatorNamespace resolvedNamespace = dmlNamespace.resolve();
       if (resolvedNamespace.isWrapperFor(TableNamespace.class)) {
         final TableNamespace tableNamespace = resolvedNamespace.unwrap(TableNamespace.class);
@@ -214,7 +214,9 @@ public class SqlValidatorUtil {
   }
 
   /**
-   * Gets the bit-set to the column ordinals in the source for columns that intersect in the target.
+   * Gets the bit-set to the column ordinals in the source for columns that
+   * intersect in the target.
+   *
    * @param sourceRowType The source upon which to ordinate the bit set.
    * @param targetRowType The target to overlay on the source to create the bit set.
    */
@@ -235,8 +237,10 @@ public class SqlValidatorUtil {
   public static ImmutableBitSet getOrdinalBitSet(
       RelDataType sourceRowType,
       Map<Integer, RelDataTypeField> indexToField) {
-    ImmutableBitSet source = ImmutableBitSet.of(
-        Util.transform(sourceRowType.getFieldList(), RelDataTypeField::getIndex));
+    ImmutableBitSet source =
+        ImmutableBitSet.of(
+            Util.transform(sourceRowType.getFieldList(),
+                RelDataTypeField::getIndex));
     // checkerframework: found   : Set<@KeyFor("indexToField") Integer>
     //noinspection RedundantCast
     ImmutableBitSet target =
@@ -283,8 +287,9 @@ public class SqlValidatorUtil {
    */
   static void checkIdentifierListForDuplicates(List<? extends @Nullable SqlNode> columnList,
       SqlValidatorImpl.ValidationErrorFunction validationErrorFunction) {
-    final List<List<String>> names = Util.transform(columnList,
-        sqlNode -> ((SqlIdentifier) requireNonNull(sqlNode, "sqlNode")).names);
+    final List<List<String>> names =
+        Util.transform(columnList,
+            node -> ((SqlIdentifier) requireNonNull(node, "node")).names);
     final int i = Util.firstDuplicate(names);
     if (i >= 0) {
       throw validationErrorFunction.apply(
@@ -521,16 +526,18 @@ public class SqlValidatorUtil {
     assert systemFieldList != null;
     switch (joinType) {
     case LEFT:
-      rightType = typeFactory.createTypeWithNullability(
-          requireNonNull(rightType, "rightType"), true);
+      rightType =
+          typeFactory.createTypeWithNullability(
+              requireNonNull(rightType, "rightType"), true);
       break;
     case RIGHT:
       leftType = typeFactory.createTypeWithNullability(leftType, true);
       break;
     case FULL:
       leftType = typeFactory.createTypeWithNullability(leftType, true);
-      rightType = typeFactory.createTypeWithNullability(
-          requireNonNull(rightType, "rightType"), true);
+      rightType =
+          typeFactory.createTypeWithNullability(
+              requireNonNull(rightType, "rightType"), true);
       break;
     case SEMI:
     case ANTI:
@@ -689,7 +696,7 @@ public class SqlValidatorUtil {
     }
   }
 
-  public static @Nullable SelectScope getEnclosingSelectScope(@Nullable SqlValidatorScope scope) {
+  public static @Nullable SelectScope getEnclosingSelectScope(SqlValidatorScope scope) {
     while (scope instanceof DelegatingScope) {
       if (scope instanceof SelectScope) {
         return (SelectScope) scope;
@@ -824,9 +831,9 @@ public class SqlValidatorUtil {
       return;
     case ROLLUP:
     case CUBE: {
-      // GROUPING SETS ( (a), ROLLUP(c,b), CUBE(d,e) )
+      // GROUPING SETS ((a), ROLLUP(c,b), CUBE(d,e))
       // is EQUIVALENT to
-      // GROUPING SETS ( (a), (c,b), (b) ,(), (d,e), (d), (e) ).
+      // GROUPING SETS ((a), (c,b), (b) ,(), (d,e), (d), (e)).
       // Expand all ROLLUP/CUBE nodes
       List<ImmutableBitSet> operandBitSet =
           analyzeGroupTuple(scope, groupAnalyzer,
@@ -925,10 +932,10 @@ public class SqlValidatorUtil {
         }
       }
 
-      RelDataTypeField field = requireNonNull(
-          nameMatcher.field(rowType, originalFieldName),
-          () -> "field " + originalFieldName + " is not found in " + rowType
-              + " with " + nameMatcher);
+      RelDataTypeField field =
+          requireNonNull(nameMatcher.field(rowType, originalFieldName),
+              () -> "field " + originalFieldName + " is not found in " + rowType
+                  + " with " + nameMatcher);
       int origPos = namespaceOffset + field.getIndex();
 
       groupAnalyzer.groupExprProjection.put(origPos, ref);
@@ -1096,8 +1103,7 @@ public class SqlValidatorUtil {
           && nameMatcher.matches(schemaName, schema.getName())) {
         continue;
       }
-      schema = schema.getSubSchema(schemaName,
-          nameMatcher.isCaseSensitive());
+      schema = schema.getSubSchema(schemaName, nameMatcher.isCaseSensitive());
       if (schema == null) {
         return null;
       }
@@ -1110,8 +1116,7 @@ public class SqlValidatorUtil {
     CalciteSchema.TableEntry entry =
         schema.getTable(name, caseSensitive);
     if (entry == null) {
-      entry = schema.getTableBasedOnNullaryFunction(name,
-          caseSensitive);
+      entry = schema.getTableBasedOnNullaryFunction(name, caseSensitive);
     }
     return entry;
   }
@@ -1197,19 +1202,17 @@ public class SqlValidatorUtil {
       RelDataType rowType,
       SqlNode expr) {
     final String tableName = "_table_";
-    final SqlSelect select0 = new SqlSelect(SqlParserPos.ZERO, null,
-        new SqlNodeList(Collections.singletonList(expr), SqlParserPos.ZERO),
-        new SqlIdentifier(tableName, SqlParserPos.ZERO),
-        null, null, null, null, null, null, null, null);
-    Prepare.CatalogReader catalogReader = createSingleTableCatalogReader(
-        caseSensitive,
-        tableName,
-        typeFactory,
-        rowType);
-    SqlValidator validator = newValidator(operatorTable,
-        catalogReader,
-        typeFactory,
-        SqlValidator.Config.DEFAULT);
+    final SqlSelect select0 =
+        new SqlSelect(SqlParserPos.ZERO, null,
+            new SqlNodeList(Collections.singletonList(expr), SqlParserPos.ZERO),
+            new SqlIdentifier(tableName, SqlParserPos.ZERO),
+            null, null, null, null, null, null, null, null, null);
+    Prepare.CatalogReader catalogReader =
+        createSingleTableCatalogReader(caseSensitive, tableName, typeFactory,
+            rowType);
+    SqlValidator validator =
+        newValidator(operatorTable, catalogReader, typeFactory,
+            SqlValidator.Config.DEFAULT);
     final SqlSelect select = (SqlSelect) validator.validate(select0);
     SqlNodeList selectList = select.getSelectList();
     assert selectList.size() == 1
@@ -1249,17 +1252,12 @@ public class SqlValidatorUtil {
     // prepare root schema
     final ExplicitRowTypeTable table = new ExplicitRowTypeTable(rowType);
     final Map<String, Table> tableMap = Collections.singletonMap(tableName, table);
-    CalciteSchema schema = CalciteSchema.createRootSchema(
-        false,
-        false,
-        "",
-        new ExplicitTableSchema(tableMap));
+    CalciteSchema schema =
+        CalciteSchema.createRootSchema(false, false, "",
+            new ExplicitTableSchema(tableMap));
 
-    return new CalciteCatalogReader(
-        schema,
-        new ArrayList<>(new ArrayList<>()),
-        typeFactory,
-        connectionConfig);
+    return new CalciteCatalogReader(schema, new ArrayList<>(new ArrayList<>()),
+        typeFactory, connectionConfig);
   }
 
   /**

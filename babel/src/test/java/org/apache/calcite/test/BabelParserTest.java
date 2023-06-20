@@ -15,9 +15,9 @@
  * limitations under the License.
  */
 package org.apache.calcite.test;
-
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.dialect.MysqlSqlDialect;
+import org.apache.calcite.sql.dialect.PostgresqlSqlDialect;
 import org.apache.calcite.sql.parser.SqlAbstractParserImpl;
 import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserFixture;
@@ -38,6 +38,7 @@ import java.util.Objects;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasToString;
 
 /**
  * Tests the "Babel" SQL parser, that understands all dialects of SQL.
@@ -107,6 +108,23 @@ class BabelParserTest extends SqlParserTest {
     final String expected = "SELECT 1 AS `YEAR`\n"
         + "FROM `T`";
     sql(sql).ok(expected);
+  }
+
+  @Test void testIdentifier() {
+    // MySQL supports identifiers started with numbers
+    SqlParserFixture mysqlF = fixture().withDialect(MysqlSqlDialect.DEFAULT);
+    mysqlF.sql("select 1 as 1_c1 from t")
+        .ok("SELECT 1 AS `1_c1`\n"
+            + "FROM `t`");
+
+    // PostgreSQL allows identifier
+    // to begin with a letter (a-z, but also letters with diacritical marks and non-Latin letters)
+    // or an underscore (_). Subsequent characters in an identifier
+    // can be letters, underscores, digits (0-9), or dollar signs ($)
+    SqlParserFixture postgreF = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    postgreF.sql("select 1 as \200_$\251\377 from t")
+        .ok("SELECT 1 AS \"\200_$\251\377\"\n"
+            + "FROM \"t\"");
   }
 
   /** Tests that there are no reserved keywords. */
@@ -333,6 +351,85 @@ class BabelParserTest extends SqlParserTest {
         .ok("SELECT (ARRAY['a', 'b'])");
   }
 
+  @Test void testPostgresqlShow() {
+    SqlParserFixture f = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    f.sql("SHOW autovacuum")
+        .ok("SHOW \"autovacuum\"");
+    f.sql("SHOW TRANSACTION ISOLATION LEVEL")
+        .ok("SHOW \"transaction_isolation\"");
+  }
+
+  @Test void testPostgresqlSetOption() {
+    SqlParserFixture f = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    f.sql("SET SESSION autovacuum = true")
+        .ok("ALTER SESSION SET \"autovacuum\" = TRUE");
+    f.sql("SET SESSION autovacuum = DEFAULT")
+        .ok("ALTER SESSION SET \"autovacuum\" = DEFAULT");
+    f.sql("SET LOCAL autovacuum TO 'DEFAULT'")
+        .ok("ALTER LOCAL SET \"autovacuum\" = 'DEFAULT'");
+
+    f.sql("SET SESSION TIME ZONE DEFAULT")
+        .ok("ALTER SESSION SET \"timezone\" = DEFAULT");
+    f.sql("SET SESSION TIME ZONE LOCAL")
+        .ok("ALTER SESSION SET \"timezone\" = 'LOCAL'");
+    f.sql("SET TIME ZONE 'PST8PDT'")
+        .ok("SET \"timezone\" = 'PST8PDT'");
+    f.sql("SET TIME ZONE INTERVAL '-08:00' HOUR TO MINUTE")
+        .ok("SET \"timezone\" = INTERVAL '-08:00' HOUR TO MINUTE");
+
+    f.sql("SET search_path = public,public,\"$user\"")
+        .ok("SET \"search_path\" = \"public\", \"public\", \"$user\"");
+    f.sql("SET SCHEMA public,public,\"$user\"")
+        .ok("SET \"search_path\" = \"public\", \"public\", \"$user\"");
+    f.sql("SET NAMES iso_8859_15_to_utf8")
+        .ok("SET \"client_encoding\" = \"iso_8859_15_to_utf8\"");
+  }
+
+  @Test void testPostgresqlBegin() {
+    SqlParserFixture f = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    f.sql("BEGIN").same();
+    f.sql("BEGIN READ ONLY").same();
+    f.sql("BEGIN TRANSACTION READ WRITE")
+        .ok("BEGIN READ WRITE");
+    f.sql("BEGIN WORK ISOLATION LEVEL SERIALIZABLE")
+        .ok("BEGIN ISOLATION LEVEL SERIALIZABLE");
+    f.sql("BEGIN ISOLATION LEVEL SERIALIZABLE, READ ONLY, DEFERRABLE").same();
+    f.sql("BEGIN ISOLATION LEVEL SERIALIZABLE, READ WRITE, NOT DEFERRABLE").same();
+  }
+
+  @Test void testPostgresqlCommit() {
+    SqlParserFixture f = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    f.sql("COMMIT").same();
+    f.sql("COMMIT WORK")
+        .ok("COMMIT");
+    f.sql("COMMIT TRANSACTION")
+        .ok("COMMIT");
+    f.sql("COMMIT AND NO CHAIN")
+        .ok("COMMIT");
+    f.sql("COMMIT AND CHAIN").same();
+  }
+
+  @Test void testPostgresqlRollback() {
+    SqlParserFixture f = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    f.sql("ROLLBACK").same();
+    f.sql("ROLLBACK WORK")
+        .ok("ROLLBACK");
+    f.sql("ROLLBACK TRANSACTION")
+        .ok("ROLLBACK");
+    f.sql("ROLLBACK AND NO CHAIN")
+        .ok("ROLLBACK");
+    f.sql("ROLLBACK AND CHAIN").same();
+  }
+
+  @Test void testPostgresqlDiscard() {
+    SqlParserFixture f = fixture().withDialect(PostgresqlSqlDialect.DEFAULT);
+    f.sql("DISCARD ALL").same();
+    f.sql("DISCARD PLANS").same();
+    f.sql("DISCARD SEQUENCES").same();
+    f.sql("DISCARD TEMPORARY").same();
+    f.sql("DISCARD TEMP").same();
+  }
+
   /** Similar to {@link #testHoist()} but using custom parser. */
   @Test void testHoistMySql() {
     // SQL contains back-ticks, which require MySQL's quoting,
@@ -356,7 +453,7 @@ class BabelParserTest extends SqlParserTest {
         + "from `my emp` /* comment with 'quoted string'? */ as e\n"
         + "where deptno < ?3\n"
         + "and DATEADD(day, ?4, hiredate) > ?5";
-    assertThat(hoisted.toString(), is(expected));
+    assertThat(hoisted, hasToString(expected));
 
     // Custom string converts variables to '[N:TYPE:VALUE]'
     final String expected2 = "select [0:DECIMAL:1] as x,\n"

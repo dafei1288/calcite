@@ -234,14 +234,14 @@ public abstract class RexProgramBuilderBase {
   /**
    * Creates a call to the CAST operator.
    *
-   * <p>This method enables to create {@code CAST(42 nullable int)} expressions.</p>
+   * <p>This method enables to create {@code CAST(42 nullable int)} expressions.
    *
    * @param e input node
    * @param type type to cast to
    * @return call to CAST operator
    */
   protected RexNode abstractCast(RexNode e, RelDataType type) {
-    return rexBuilder.makeAbstractCast(type, e);
+    return rexBuilder.makeAbstractCast(type, e, false);
   }
 
   /**
@@ -250,8 +250,8 @@ public abstract class RexProgramBuilderBase {
    *
    * <p>Tries to expand the cast, and therefore the result may be something
    * other than a {@link RexCall} to the CAST operator, such as a
-   * {@link RexLiteral}.</p>
-
+   * {@link RexLiteral}.
+   *
    * @param e input node
    * @param type type to cast to
    * @return input node converted to given type
@@ -288,6 +288,10 @@ public abstract class RexProgramBuilderBase {
     return rexBuilder.makeCall(SqlStdOperatorTable.LIKE, ref, pattern);
   }
 
+  protected RexNode similar(RexNode ref, RexNode pattern) {
+    return rexBuilder.makeCall(SqlStdOperatorTable.SIMILAR_TO, ref, pattern);
+  }
+
   protected RexNode like(RexNode ref, RexNode pattern, RexNode escape) {
     return rexBuilder.makeCall(SqlStdOperatorTable.LIKE, ref, pattern, escape);
   }
@@ -321,11 +325,7 @@ public abstract class RexProgramBuilderBase {
   }
 
   protected RexNode item(RexNode inputRef, RexNode literal) {
-    RexNode rexNode = rexBuilder.makeCall(
-        SqlStdOperatorTable.ITEM,
-        inputRef,
-        literal);
-    return rexNode;
+    return rexBuilder.makeCall(SqlStdOperatorTable.ITEM, inputRef, literal);
   }
 
   /**
@@ -514,6 +514,7 @@ public abstract class RexProgramBuilderBase {
   /**
    * Creates {@code nullable boolean variable} with index of 0.
    * If you need several distinct variables, use {@link #vBool(int)}
+   *
    * @return nullable boolean variable with index of 0
    */
   protected RexNode vBool() {

@@ -117,6 +117,10 @@ public class PhysTypeImpl implements PhysType {
     return format;
   }
 
+  @Override public JavaTypeFactory getTypeFactory() {
+    return typeFactory;
+  }
+
   @Override public PhysType project(List<Integer> integers, JavaRowFormat format) {
     return project(integers, false, format);
   }
@@ -258,9 +262,12 @@ public class PhysTypeImpl implements PhysType {
     // The conversion must be strict so optimizations of the targetFormat should not be performed
     // by the code that follows. If necessary the target format can be optimized before calling
     // this method.
-    PhysType targetPhysType = PhysTypeImpl.of(typeFactory, rowType, targetFormat, false);
-    final Expression selector = Expressions.lambda(Function1.class,
-        targetPhysType.record(fieldReferences(o_, Util.range(fieldCount))), o_);
+    PhysType targetPhysType =
+        PhysTypeImpl.of(typeFactory, rowType, targetFormat, false);
+    final Expression selector =
+        Expressions.lambda(Function1.class,
+            targetPhysType.record(fieldReferences(o_, Util.range(fieldCount))),
+            o_);
     return Expressions.call(exp, BuiltInMethod.SELECT.method, selector);
   }
 
@@ -522,8 +529,9 @@ public class PhysTypeImpl implements PhysType {
 
   @Override public PhysType component(int fieldOrdinal) {
     final RelDataTypeField field = rowType.getFieldList().get(fieldOrdinal);
-    RelDataType componentType = requireNonNull(field.getType().getComponentType(),
-        () -> "field.getType().getComponentType() for " + field);
+    RelDataType componentType =
+        requireNonNull(field.getType().getComponentType(),
+            () -> "field.getType().getComponentType() for " + field);
     return PhysTypeImpl.of(typeFactory,
         toStruct(componentType), format, false);
   }

@@ -27,8 +27,9 @@ import java.sql.SQLException;
 
 import static org.apache.calcite.test.CalciteAssert.that;
 
+import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.core.Is.is;
+import static org.hamcrest.Matchers.hasToString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -37,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  *
  * <p>The idea is that as much as possible of the query is pushed down
  * to the JDBC data source, in the form of a large (and hopefully efficient)
- * SQL statement.</p>
+ * SQL statement.
  *
  * @see JdbcFrontJdbcBackLinqMiddleTest
  */
@@ -84,13 +85,14 @@ class JdbcFrontJdbcBackTest {
     that()
         .with(CalciteAssert.Config.REGULAR_PLUS_METADATA)
         .doWithConnection(connection -> {
-          try (ResultSet rset = connection.getMetaData().getTables(null, null,
-              null, new String[] {tableType})) {
+          try (ResultSet rset =
+                   connection.getMetaData().getTables(null, null, null,
+                       new String[] {tableType})) {
             StringBuilder buf = new StringBuilder();
             while (rset.next()) {
               buf.append(rset.getString(3)).append(';');
             }
-            assertThat(buf.toString(), matcher);
+            assertThat(buf, hasToString(matcher));
           } catch (SQLException e) {
             throw TestUtil.rethrow(e);
           }
@@ -102,16 +104,16 @@ class JdbcFrontJdbcBackTest {
         .with(CalciteAssert.Config.JDBC_FOODMART)
         .doWithConnection(connection -> {
           try {
-            ResultSet rset =
+            ResultSet resultSet =
                 connection.getMetaData().getColumns(
                     null, null, "sales_fact_1997", null);
             StringBuilder buf = new StringBuilder();
-            while (rset.next()) {
-              buf.append(rset.getString(4)).append(';');
+            while (resultSet.next()) {
+              buf.append(resultSet.getString(4)).append(';');
             }
-            assertEquals(
-                "product_id;time_id;customer_id;promotion_id;store_id;store_sales;store_cost;unit_sales;",
-                buf.toString());
+            assertThat(buf,
+                hasToString("product_id;time_id;customer_id;promotion_id;"
+                    + "store_id;store_sales;store_cost;unit_sales;"));
           } catch (SQLException e) {
             throw TestUtil.rethrow(e);
           }

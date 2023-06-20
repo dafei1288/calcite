@@ -118,6 +118,7 @@ public class RelMetadataQuery extends RelMetadataQueryBase {
 
   /**
    * Create a RelMetadataQuery with a given {@link MetadataHandlerProvider}.
+   *
    * @param provider The provider to use for construction.
    */
   public RelMetadataQuery(MetadataHandlerProvider provider) {
@@ -878,8 +879,8 @@ public class RelMetadataQuery extends RelMetadataQueryBase {
       SqlExplainLevel explainLevel) {
     for (;;) {
       try {
-        Boolean b = explainVisibilityHandler.isVisibleInExplain(rel, this,
-            explainLevel);
+        Boolean b =
+            explainVisibilityHandler.isVisibleInExplain(rel, this, explainLevel);
         return b == null || b;
       } catch (MetadataHandlerProvider.NoHandler e) {
         explainVisibilityHandler = revise(BuiltInMetadata.ExplainVisibility.Handler.class);

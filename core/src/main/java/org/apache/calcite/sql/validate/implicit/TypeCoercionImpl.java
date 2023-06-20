@@ -37,6 +37,7 @@ import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlOperandMetadata;
 import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.type.SqlTypeMappingRule;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorScope;
@@ -71,15 +72,15 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    * mainly used for set operations like UNION, INTERSECT and EXCEPT.
    *
    * <p>Rules:
-   * <pre>
-   *
+   * <blockquote><pre>
    *       type1, type2  type3       select a, b, c from t1
    *          \      \      \
    *         type4  type5  type6              UNION
    *          /      /      /
    *       type7  type8  type9       select d, e, f from t2
-   * </pre>
-   * For struct type (type1, type2, type3) union type (type4, type5, type6),
+   * </pre></blockquote>
+   *
+   * <p>For struct type (type1, type2, type3) union type (type4, type5, type6),
    * infer the first result column type type7 as the wider type of type1 and type4,
    * the second column type as the wider type of type2 and type5 and so on.
    *
@@ -174,9 +175,8 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
     return coerced;
   }
 
-  /**
-   * For NUMERIC and STRING operands, cast STRING to data type of the other operand.
-   **/
+  /** For NUMERIC and STRING operands, cast STRING to data type of the other
+   * operand. */
   protected boolean binaryArithmeticWithStrings(
       SqlCallBinding binding,
       RelDataType left,
@@ -210,7 +210,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
   /**
    * Coerces operands in binary comparison expressions.
    *
-   * <p>Rules:</p>
+   * <p>Rules:
    * <ul>
    *   <li>For EQUALS(=) operator: 1. If operands are BOOLEAN and NUMERIC, evaluate
    *   `1=true` and `0=false` all to be true; 2. If operands are datetime and string,
@@ -267,7 +267,7 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    * If there are N(more than 2) operands,
    * finds the common type between two operands from left to right:
    *
-   * <p>Rules:</p>
+   * <p>Rules:
    * <pre>
    *   type1     type2    type3
    *    |         |        |
@@ -410,8 +410,9 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
           validator.deriveType(
               scope, node));
     }
-    SqlNode elseOp = requireNonNull(caseCall.getElseOperand(),
-        () -> "getElseOperand() is null for " + caseCall);
+    SqlNode elseOp =
+        requireNonNull(caseCall.getElseOperand(),
+            () -> "getElseOperand() is null for " + caseCall);
     RelDataType elseOpType = validator.deriveType(scope, elseOp);
     argTypes.add(elseOpType);
     // Entering this method means we have already got a wider type, recompute it here
@@ -505,10 +506,13 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
           }
         };
 
-        RelDataType widenType = commonTypeForBinaryComparison(columnIthTypes.get(0),
-            columnIthTypes.get(1));
+        RelDataType widenType =
+            commonTypeForBinaryComparison(columnIthTypes.get(0),
+                columnIthTypes.get(1));
         if (widenType == null) {
-          widenType = getTightestCommonType(columnIthTypes.get(0), columnIthTypes.get(1));
+          widenType =
+              getTightestCommonType(columnIthTypes.get(0),
+                  columnIthTypes.get(1));
         }
         if (widenType == null) {
           // Can not find any common type, just return early.
@@ -593,9 +597,9 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
    */
   @Override public boolean userDefinedFunctionCoercion(SqlValidatorScope scope,
       SqlCall call, SqlFunction function) {
-    final SqlOperandMetadata operandMetadata = requireNonNull(
-        (SqlOperandMetadata) function.getOperandTypeChecker(),
-        () -> "getOperandTypeChecker is not defined for " + function);
+    final SqlOperandMetadata operandMetadata =
+        requireNonNull((SqlOperandMetadata) function.getOperandTypeChecker(),
+            () -> "getOperandTypeChecker is not defined for " + function);
     final List<RelDataType> paramTypes =
         operandMetadata.paramTypes(scope.getValidator().getTypeFactory());
     boolean coerced = false;
@@ -610,10 +614,12 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
           return false;
         }
         // Column list operand type is not supported now.
-        coerced = coerceOperandType(scope, (SqlCall) operand, 0,
-            paramTypes.get(formalIndex)) || coerced;
+        coerced =
+            coerceOperandType(scope, (SqlCall) operand, 0,
+                paramTypes.get(formalIndex)) || coerced;
       } else {
-        coerced = coerceOperandType(scope, call, i, paramTypes.get(i)) || coerced;
+        coerced =
+            coerceOperandType(scope, call, i, paramTypes.get(i)) || coerced;
       }
     }
     return coerced;
@@ -624,11 +630,12 @@ public class TypeCoercionImpl extends AbstractTypeCoercion {
     final List<RelDataTypeField> sourceFields = sourceRowType.getFieldList();
     final List<RelDataTypeField> targetFields = targetRowType.getFieldList();
     final int sourceCount = sourceFields.size();
+    SqlTypeMappingRule mappingRule = validator.getTypeMappingRule();
     for (int i = 0; i < sourceCount; i++) {
       RelDataType sourceType = sourceFields.get(i).getType();
       RelDataType targetType = targetFields.get(i).getType();
       if (!SqlTypeUtil.equalSansNullability(validator.getTypeFactory(), sourceType, targetType)
-          && !SqlTypeUtil.canCastFrom(targetType, sourceType, true)) {
+          && !SqlTypeUtil.canCastFrom(targetType, sourceType, mappingRule)) {
         // Returns early if types not equals and can not do type coercion.
         return false;
       }

@@ -41,11 +41,13 @@ import java.util.stream.Collectors;
  * {@link org.apache.calcite.rel.core.Join} and creates
  * {@link org.apache.calcite.rel.core.Filter}s with those predicates as new inputs of the join.
  *
- * Since the Null value can never match in the inner join and it can lead to skewness due to
- * too many Null values, a not-null filter can be created and pushed down into the input of join.
+ * <p>Since the Null value can never match in the inner join, and it can lead to
+ * skewness due to too many Null values, a not-null filter can be created and
+ * pushed down into the input of join.
  *
- * Similar to {@link CoreRules#FILTER_INTO_JOIN}, it would try to create filters and push them into
- * the inputs of the join to filter data as much as possible before join.
+ * <p>Similar to {@link CoreRules#FILTER_INTO_JOIN}, it would try to create
+ * filters and push them into the inputs of the join to filter data as much as
+ * possible before join.
  *
  */
 @Value.Enclosing
@@ -62,9 +64,9 @@ public class JoinDeriveIsNotNullFilterRule
     final RelMetadataQuery mq = call.getMetadataQuery();
 
     final ImmutableBitSet.Builder notNullableKeys = ImmutableBitSet.builder();
-    RelOptUtil.conjunctions(join.getCondition()).forEach(node -> {
-      if (Strong.isStrong(node)) {
-        notNullableKeys.addAll(RelOptUtil.InputFinder.bits(node));
+    RelOptUtil.InputFinder.bits(join.getCondition()).forEach(bit -> {
+      if (Strong.isNotTrue(join.getCondition(), ImmutableBitSet.of(bit))) {
+        notNullableKeys.set(bit);
       }
     });
     final List<Integer> leftKeys = new ArrayList<>();

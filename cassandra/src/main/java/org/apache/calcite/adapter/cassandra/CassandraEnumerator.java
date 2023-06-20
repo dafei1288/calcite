@@ -87,9 +87,10 @@ class CassandraEnumerator implements Enumerator<Object> {
    */
   private @Nullable Object currentRowField(int index) {
     assert current != null;
-    final Object o =  current.get(index,
-        CodecRegistry.DEFAULT.codecFor(
-            current.getColumnDefinitions().get(index).getType()));
+    final Object o =
+         current.get(index,
+             CodecRegistry.DEFAULT.codecFor(
+                 current.getColumnDefinitions().get(index).getType()));
 
     return convertToEnumeratorObject(o);
   }
@@ -126,8 +127,8 @@ class CassandraEnumerator implements Enumerator<Object> {
           .mapToObj(i ->
               tupleValue.get(i,
                   CodecRegistry.DEFAULT.codecFor(
-                      tupleValue.getType().getComponentTypes().get(i)))
-          ).map(this::convertToEnumeratorObject)
+                      tupleValue.getType().getComponentTypes().get(i))))
+          .map(this::convertToEnumeratorObject)
           .map(Objects::requireNonNull) // "null" cannot appear inside collections
           .toArray();
     }

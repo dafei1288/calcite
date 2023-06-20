@@ -38,28 +38,31 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Used to initialize a single elastic node. For performance reasons (node startup costs),
- * same instance is shared across multiple tests (Elasticsearch does not allow multiple
- * instances per JVM).
+ * Used to initialize a single Elasticsearch node. For performance reasons (node
+ * startup costs), same instance is shared across multiple tests (Elasticsearch
+ * does not allow multiple instances per JVM).
  *
  * <p>This rule should be used as follows:
- * <pre>
- *  public class MyTest {
- *    public static final EmbeddedElasticsearchPolicy RULE = EmbeddedElasticsearchPolicy.create();
  *
- *    &#64;BeforeClass
- *    public static void setup() {
- *       // ... populate instance
- *       // The collections must have different names so the tests could be executed concurrently
- *    }
+ * <blockquote><pre><code>
+ * public class MyTest {
+ *   public static final EmbeddedElasticsearchPolicy RULE =
+ *       EmbeddedElasticsearchPolicy.create();
  *
- *    &#64;Test
- *    public void myTest() {
- *      RestClient client = RULE.restClient();
- *      // ....
- *    }
- *  }
- *  </pre>
+ *   &#64;BeforeClass
+ *   public static void setup() {
+ *      // ... populate instance
+ *      // The collections must have different names so the tests could be
+ *      // executed concurrently
+ *   }
+ *
+ *   &#64;Test
+ *   public void myTest() {
+ *     RestClient client = RULE.restClient();
+ *     // ....
+ *   }
+ * }
+ * </code></pre></blockquote>
  */
 class EmbeddedElasticsearchPolicy {
 
@@ -86,6 +89,7 @@ class EmbeddedElasticsearchPolicy {
 
   /**
    * Factory method to create this rule.
+   *
    * @return managed resource to be used in unit tests
    */
   public static EmbeddedElasticsearchPolicy create() {
@@ -93,16 +97,15 @@ class EmbeddedElasticsearchPolicy {
   }
 
   /**
-   * Creates index in elastic search given a mapping. Mapping can contain nested fields expressed
-   * as dots({@code .}).
+   * Creates index in Elasticsearch given a mapping. Mapping can
+   * contain nested fields expressed as dots({@code .}).
    *
-   * <p>Example
-   * <pre>
-   *  {@code
+   * <p>Example:
+   *
+   * <pre>{@code
    *     b.a: long
    *     b.b: keyword
-   *  }
-   * </pre>
+   * }</pre>
    *
    * @param index index of the index
    * @param mapping field and field type mapping
@@ -121,9 +124,44 @@ class EmbeddedElasticsearchPolicy {
     }
 
     // create index and mapping
-    final HttpEntity entity = new StringEntity(mapper().writeValueAsString(mappings),
-        ContentType.APPLICATION_JSON);
+    final HttpEntity entity =
+        new StringEntity(mapper().writeValueAsString(mappings),
+            ContentType.APPLICATION_JSON);
     final Request r = new Request("PUT", "/" + index);
+    r.setEntity(entity);
+    restClient().performRequest(r);
+  }
+
+  /**
+   * Creates alias in elastic search given an index.
+   * as dots({@code .}).
+   *
+   * <p>Example:
+   *
+   * <pre>{@code
+   *     b.a: long
+   *     b.b: keyword
+   * }</pre>
+   *
+   * @param index index of the index
+   * @param alias alias of the index
+   * @throws IOException if there is an error
+   */
+  void createAlias(String index, String alias) throws IOException {
+    Objects.requireNonNull(index, "index");
+    Objects.requireNonNull(alias, "alias");
+
+    ObjectNode actions = mapper().createObjectNode();
+
+    ObjectNode properties = actions.withObject("/actions").withObject("/add");
+    properties.put("index", index);
+    properties.put("alias", alias);
+
+    // create alias
+    final HttpEntity entity =
+        new StringEntity(mapper().writeValueAsString(actions),
+            ContentType.APPLICATION_JSON);
+    final Request r = new Request("POST", "/_aliases");
     r.setEntity(entity);
     restClient().performRequest(r);
   }
@@ -149,10 +187,10 @@ class EmbeddedElasticsearchPolicy {
   void insertDocument(String index, ObjectNode document) throws IOException {
     Objects.requireNonNull(index, "index");
     Objects.requireNonNull(document, "document");
-    String uri = String.format(Locale.ROOT,
-          "/%s/_doc?refresh", index);
-    StringEntity entity = new StringEntity(mapper().writeValueAsString(document),
-        ContentType.APPLICATION_JSON);
+    String uri = String.format(Locale.ROOT, "/%s/_doc?refresh", index);
+    StringEntity entity =
+        new StringEntity(mapper().writeValueAsString(document),
+            ContentType.APPLICATION_JSON);
     final Request r = new Request("POST", uri);
     r.setEntity(entity);
     restClient().performRequest(r);
@@ -173,8 +211,9 @@ class EmbeddedElasticsearchPolicy {
       bulk.add(mapper().writeValueAsString(doc));
     }
 
-    final StringEntity entity = new StringEntity(String.join("\n", bulk) + "\n",
-        ContentType.APPLICATION_JSON);
+    final StringEntity entity =
+        new StringEntity(String.join("\n", bulk) + "\n",
+            ContentType.APPLICATION_JSON);
 
     final Request r = new Request("POST", "/_bulk?refresh");
     r.setEntity(entity);
@@ -183,6 +222,7 @@ class EmbeddedElasticsearchPolicy {
 
   /**
    * Exposes Jackson API to be used to parse search results.
+   *
    * @return existing instance of ObjectMapper
    */
   ObjectMapper mapper() {
@@ -190,7 +230,9 @@ class EmbeddedElasticsearchPolicy {
   }
 
   /**
-   * Low-level http rest client connected to current embedded elastic search instance.
+   * Low-level http rest client connected to current embedded Elasticsearch
+   * instance.
+   *
    * @return http client connected to ES cluster
    */
   RestClient restClient() {
@@ -215,6 +257,7 @@ class EmbeddedElasticsearchPolicy {
 
   /**
    * HTTP address for rest clients (can be ES native or any other).
+   *
    * @return http address to connect to
    */
   private TransportAddress httpAddress() {

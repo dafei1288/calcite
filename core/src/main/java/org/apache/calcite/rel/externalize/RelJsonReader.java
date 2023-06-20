@@ -109,6 +109,17 @@ public class RelJsonReader {
     return RelJson.create().toType(typeFactory, o);
   }
 
+  /** Converts a JSON string (such as that produced by
+   * {@link RelJson#toJson(RexNode)}) into a Calcite expression. */
+  public static RexNode readRex(RelOptCluster typeFactory, String s)
+      throws IOException {
+    final ObjectMapper mapper = new ObjectMapper();
+    Map<String, Object> o = mapper
+        .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+        .readValue(s, TYPE_REF);
+    return RelJson.create().toRex(typeFactory, o);
+  }
+
   private void readRels(List<Map<String, Object>> jsonRels) {
     for (Map<String, Object> jsonRel : jsonRels) {
       readRel(jsonRel);
@@ -129,12 +140,11 @@ public class RelJsonReader {
       }
 
       @Override public RelOptTable getTable(String table) {
-        final List<String> list = requireNonNull(
-            getStringList(table),
-            () -> "getStringList for " + table);
-        return requireNonNull(
-            relOptSchema.getTableForMember(list),
-            () -> "table " + table + " is not found in schema " + relOptSchema.toString());
+        final List<String> list =
+            requireNonNull(getStringList(table),
+                () -> "getStringList for " + table);
+        return requireNonNull(relOptSchema.getTableForMember(list),
+            () -> "table " + table + " is not found in schema " + relOptSchema);
       }
 
       @Override public RelNode getInput() {
@@ -309,24 +319,27 @@ public class RelJsonReader {
 
   private AggregateCall toAggCall(Map<String, Object> jsonAggCall) {
     @SuppressWarnings("unchecked")
-    final Map<String, Object> aggMap = (Map) requireNonNull(
-        jsonAggCall.get("agg"),
-        "agg key is not found");
-    final SqlAggFunction aggregation = requireNonNull(
-        relJson.toAggregation(aggMap),
-        () -> "relJson.toAggregation output for " + aggMap);
-    final Boolean distinct = (Boolean) requireNonNull(jsonAggCall.get("distinct"),
-        "jsonAggCall.distinct");
+    final Map<String, Object> aggMap =
+        (Map) requireNonNull(jsonAggCall.get("agg"),
+            "agg key is not found");
+    final SqlAggFunction aggregation =
+        requireNonNull(relJson.toAggregation(aggMap),
+            () -> "relJson.toAggregation output for " + aggMap);
+    final boolean distinct =
+        requireNonNull((Boolean) jsonAggCall.get("distinct"),
+            "jsonAggCall.distinct");
     @SuppressWarnings("unchecked")
-    final List<Integer> operands = (List<Integer>) requireNonNull(
-        jsonAggCall.get("operands"),
-        "jsonAggCall.operands");
+    final List<Integer> operands =
+        requireNonNull((List<Integer>) jsonAggCall.get("operands"),
+            "jsonAggCall.operands");
     final Integer filterOperand = (Integer) jsonAggCall.get("filter");
-    final Object jsonAggType = requireNonNull(jsonAggCall.get("type"), "jsonAggCall.type");
+    final Object jsonAggType =
+        requireNonNull(jsonAggCall.get("type"), "jsonAggCall.type");
     final RelDataType type =
         relJson.toType(cluster.getTypeFactory(), jsonAggType);
     final String name = (String) jsonAggCall.get("name");
-    return AggregateCall.create(aggregation, distinct, false, false, operands,
+    return AggregateCall.create(aggregation, distinct, false, false,
+        ImmutableList.of(), operands,
         filterOperand == null ? -1 : filterOperand,
         null, RelCollations.EMPTY, type, name);
   }

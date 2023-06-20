@@ -73,7 +73,7 @@ public class SqlCallBinding extends SqlOperatorBinding {
   //~ Instance fields --------------------------------------------------------
 
   private final SqlValidator validator;
-  private final @Nullable SqlValidatorScope scope;
+  private final SqlValidatorScope scope;
   private final SqlCall call;
 
   //~ Constructors -----------------------------------------------------------
@@ -85,15 +85,11 @@ public class SqlCallBinding extends SqlOperatorBinding {
    * @param scope     Scope of call
    * @param call      Call node
    */
-  public SqlCallBinding(
-      SqlValidator validator,
-      @Nullable SqlValidatorScope scope,
+  public SqlCallBinding(SqlValidator validator, SqlValidatorScope scope,
       SqlCall call) {
-    super(
-        validator.getTypeFactory(),
-        call.getOperator());
+    super(validator.getTypeFactory(), call.getOperator());
     this.validator = validator;
-    this.scope = scope;
+    this.scope = requireNonNull(scope, "scope");
     this.call = call;
   }
 
@@ -131,7 +127,7 @@ public class SqlCallBinding extends SqlOperatorBinding {
   /**
    * Returns the scope of the call.
    */
-  public @Nullable SqlValidatorScope getScope() {
+  public SqlValidatorScope getScope() {
     return scope;
   }
 
@@ -180,9 +176,11 @@ public class SqlCallBinding extends SqlOperatorBinding {
   /** Returns the operands to a call permuted into the same order as the
    * formal parameters of the function. */
   private List<SqlNode> permutedOperands(final SqlCall call) {
-    final SqlOperandMetadata operandMetadata = requireNonNull(
-        (SqlOperandMetadata) call.getOperator().getOperandTypeChecker(),
-        () -> "operandTypeChecker is null for " + call + ", operator " + call.getOperator());
+    final SqlOperator operator = call.getOperator();
+    final SqlOperandMetadata operandMetadata =
+        requireNonNull((SqlOperandMetadata) operator.getOperandTypeChecker(),
+            () -> "operandTypeChecker is null for " + call
+                + ", operator " + operator);
     final List<String> paramNames = operandMetadata.paramNames();
     final List<SqlNode> permuted = new ArrayList<>();
     final SqlNameMatcher nameMatcher =
@@ -207,7 +205,7 @@ public class SqlCallBinding extends SqlOperatorBinding {
           if (args != null) {
             throw SqlUtil.newContextException(args.right.getParserPosition(),
                 RESOURCE.paramNotFoundInFunctionDidYouMean(args.right.getSimple(),
-                    call.getOperator().getName(), args.left));
+                    operator.getName(), args.left));
           }
           if (operandMetadata.isFixedParameters()) {
             // Not like user defined functions, we do not patch up the operands

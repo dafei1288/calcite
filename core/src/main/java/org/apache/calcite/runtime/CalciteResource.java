@@ -389,6 +389,9 @@ public interface CalciteResource {
   @BaseMessage("Aggregate expression ''{0}'' must not contain a WITHIN GROUP clause")
   ExInst<SqlValidatorException> withinGroupClauseIllegalInAggregate(String a0);
 
+  @BaseMessage("Percentile functions must have 1 or 2 arguments")
+  ExInst<SqlValidatorException> percentileFunctionsArgumentLimit();
+
   @BaseMessage("Aggregate expression is illegal in ORDER BY clause of non-aggregating SELECT")
   ExInst<SqlValidatorException> aggregateIllegalInOrderBy();
 
@@ -478,6 +481,9 @@ public interface CalciteResource {
   @BaseMessage("Duplicate window specification not allowed in the same window clause")
   ExInst<SqlValidatorException> dupWindowSpec();
 
+  @BaseMessage("QUALIFY expression ''{0}'' must contain a window function")
+  ExInst<SqlValidatorException> qualifyExpressionMustContainWindowFunction(String a0);
+
   @BaseMessage("ROW/RANGE not allowed with RANK, DENSE_RANK or ROW_NUMBER functions")
   ExInst<SqlValidatorException> rankWithFrame();
 
@@ -498,6 +504,9 @@ public interface CalciteResource {
 
   @BaseMessage("Invalid type ''{0}'' in ORDER BY clause of ''{1}'' function. Only NUMERIC types are supported")
   ExInst<SqlValidatorException> unsupportedTypeInOrderBy(String a0, String a1);
+
+  @BaseMessage("Invalid type ''{0}'' in ''{1}'' function. Only ''{2}'' type is supported")
+  ExInst<SqlValidatorException> unsupportedTypeInConvertFunc(String a0, String a1, String a2);
 
   @BaseMessage("''{0}'' requires precisely one ORDER BY key")
   ExInst<SqlValidatorException> orderByRequiresOneKey(String a0);
@@ -567,6 +576,9 @@ public interface CalciteResource {
   @BaseMessage("Argument to function ''{0}'' must be a literal")
   ExInst<SqlValidatorException> argumentMustBeLiteral(String a0);
 
+  @BaseMessage("Argument to function ''{0}'' must be a boolean literal")
+  ExInst<SqlValidatorException> argumentMustBeBooleanLiteral(String a0);
+
   @BaseMessage("Argument to function ''{0}'' must be a positive integer literal")
   ExInst<SqlValidatorException> argumentMustBePositiveInteger(String a0);
 
@@ -594,6 +606,10 @@ public interface CalciteResource {
   @BaseMessage("Argument to function ''{0}'' must be a valid precision between ''{1,number,#}'' and ''{2,number,#}''")
   ExInst<SqlValidatorException> argumentMustBeValidPrecision(String a0, int a1,
       int a2);
+
+  @BaseMessage("Call to function ''{0}'' with argument of type ''{1}'' requires extra delimiter argument")
+  ExInst<SqlValidatorException> delimiterIsRequired(String functionName,
+      String argumentTypeName);
 
   @BaseMessage("Wrong arguments for table function ''{0}'' call. Expected ''{1}'', actual ''{2}''")
   ExInst<CalciteException> illegalArgumentForTableFunctionCall(String a0,
@@ -875,6 +891,9 @@ public interface CalciteResource {
   @BaseMessage("Third argument (pad pattern) for LPAD/RPAD must not be empty")
   ExInst<CalciteException> illegalEmptyPadPattern();
 
+  @BaseMessage("Array index {0,number,#} is out of bounds")
+  ExInst<CalciteException> arrayIndexOutOfBounds(int idx);
+
   @BaseMessage("Substring error: negative substring length not allowed")
   ExInst<CalciteException> illegalNegativeSubstringLength();
 
@@ -1010,6 +1029,12 @@ public interface CalciteResource {
   @BaseMessage("No operator for ''{0}'' with kind: ''{1}'', syntax: ''{2}'' during JSON deserialization")
   ExInst<CalciteException> noOperator(String name, String kind, String syntax);
 
+  @BaseMessage("Invalid input for POSITION function: from operand value must not be zero")
+  ExInst<CalciteException> fromNotZero();
+
+  @BaseMessage("Invalid input for POSITION function: occurrence operand value must be positive")
+  ExInst<CalciteException> occurrenceNotZero();
+
   @BaseMessage("Only tables with set semantics may be partitioned. Invalid PARTITION BY clause in the {0,number,#}-th operand of table function ''{1}''")
   ExInst<SqlValidatorException> invalidPartitionKeys(int idx, String funcName);
 
@@ -1018,5 +1043,4 @@ public interface CalciteResource {
 
   @BaseMessage("A table function at most has one input table with row semantics. Table function ''{0}'' has multiple input tables with row semantics")
   ExInst<SqlValidatorException> multipleRowSemanticsTables(String funcName);
-
 }

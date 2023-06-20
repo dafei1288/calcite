@@ -208,7 +208,7 @@ public abstract class EnumerableDefaults {
   /**
    * Converts an Enumerable to an IQueryable.
    *
-   * <p>Analogous to the LINQ's Enumerable.AsQueryable extension method.</p>
+   * <p>Analogous to the LINQ's Enumerable.AsQueryable extension method.
    *
    * @param enumerable Enumerable
    * @param <TSource> Element type
@@ -321,7 +321,7 @@ public abstract class EnumerableDefaults {
   }
 
   /**
-   * <p>Analogous to LINQ's Enumerable.Cast extension method.</p>
+   * Analogous to LINQ's Enumerable.Cast extension method.
    *
    * @param clazz Target type
    * @param <T2> Target type
@@ -1644,15 +1644,15 @@ public abstract class EnumerableDefaults {
   }
 
   /**
-   * <p>Fetches blocks of size {@code batchSize} from {@code outer},
+   * Fetches blocks of size {@code batchSize} from {@code outer},
    * storing each block into a list ({@code outerValues}).
    * For each block, it uses the {@code inner} function to
-   * obtain an enumerable with the correlated rows from the right (inner) input.</p>
+   * obtain an enumerable with the correlated rows from the right (inner) input.
    *
    * <p>Each result present in the {@code innerEnumerator} has matched at least one
    * value from the block {@code outerValues}.
    * At this point a mini nested loop is performed between the outer values
-   * and inner values using the {@code predicate} to find out the actual matching join results.</p>
+   * and inner values using the {@code predicate} to find out the actual matching join results.
    *
    * <p>In order to optimize this mini nested loop, during the first iteration
    * (the first value from {@code outerValues}) we use the {@code innerEnumerator}
@@ -1660,7 +1660,7 @@ public abstract class EnumerableDefaults {
    * with said {@code innerEnumerator} rows. In the subsequent iterations
    * (2nd, 3rd, etc. value from {@code outerValues}) the list {@code innerValues} is used,
    * since it contains all the {@code innerEnumerator} values,
-   * which were stored in the first iteration.</p>
+   * which were stored in the first iteration.
    */
   public static <TSource, TInner, TResult> Enumerable<TResult> correlateBatchJoin(
       final JoinType joinType,
@@ -1915,8 +1915,8 @@ public abstract class EnumerableDefaults {
         // moment when we are sure
         // that it will be really needed, i.e. when the first outer
         // enumerator item is processed
-        final Supplier<Lookup<TKey, TInner>> innerLookup = Suppliers.memoize(
-            () ->
+        final Supplier<Lookup<TKey, TInner>> innerLookup =
+            Suppliers.memoize(() ->
                 comparer == null
                     ? inner.toLookup(innerKeySelector)
                     : inner.toLookup(innerKeySelector, comparer));
@@ -2147,6 +2147,7 @@ public abstract class EnumerableDefaults {
   /**
    * Joins two inputs that are sorted on the key.
    * Inputs must sorted in ascending order, nulls last.
+   *
    * @deprecated Use {@link #mergeJoin(Enumerable, Enumerable, Function1, Function1, Function2, JoinType, Comparator)}
    */
   @Deprecated // to be removed before 2.0
@@ -2171,7 +2172,9 @@ public abstract class EnumerableDefaults {
   }
 
   /**
-   * Returns if certain join type is supported by Enumerable Merge Join implementation.
+   * Returns if certain join type is supported by Enumerable Merge
+   * Join implementation.
+   *
    * <p>NOTE: This method is subject to change or be removed without notice.
    */
   public static boolean isMergeJoinSupported(JoinType joinType) {
@@ -2203,9 +2206,10 @@ public abstract class EnumerableDefaults {
   }
 
   /**
-   * Joins two inputs that are sorted on the key, with an extra predicate for non equi-join
-   * conditions.
-   * Inputs must sorted in ascending order, nulls last.
+   * Joins two inputs that are sorted on the key, with an extra predicate for
+   * non equi-join conditions.
+   *
+   * <p>Inputs be must sorted in ascending order, nulls last.
    *
    * @param extraPredicate predicate for non equi-join conditions. In case of equi-join,
    *                       it will be null. In case of non-equi join, the non-equi conditions
@@ -2216,7 +2220,8 @@ public abstract class EnumerableDefaults {
    * @param comparator key comparator, possibly null (in which case {@link Comparable#compareTo}
    *                   will be used).
    *
-   * NOTE: The current API is experimental and subject to change without notice.
+   * <p>NOTE: The current API is experimental and subject to change without
+   * notice.
    */
   @API(since = "1.23", status = API.Status.EXPERIMENTAL)
   public static <TSource, TInner, TKey extends Comparable<TKey>, TResult> Enumerable<TResult>
@@ -2620,7 +2625,7 @@ public abstract class EnumerableDefaults {
    * Filters the elements of an Enumerable based on a
    * specified type.
    *
-   * <p>Analogous to LINQ's Enumerable.OfType extension method.</p>
+   * <p>Analogous to LINQ's Enumerable.OfType extension method.
    *
    * @param clazz Target type
    * @param <TResult> Target type
@@ -2656,8 +2661,8 @@ public abstract class EnumerableDefaults {
         // must supply a comparator if the key does not extend Comparable.
         // Otherwise there will be a ClassCastException while retrieving.
         final Map<TKey, List<TSource>> map = new TreeMap<>(comparator);
-        final LookupImpl<TKey, TSource> lookup = toLookup_(map, source, keySelector,
-            Functions.identitySelector());
+        final LookupImpl<TKey, TSource> lookup =
+            toLookup_(map, source, keySelector, Functions.identitySelector());
         return lookup.valuesEnumerable().enumerator();
       }
     };
@@ -2666,6 +2671,7 @@ public abstract class EnumerableDefaults {
 
   /**
    * A sort implementation optimized for a sort with a fetch size (LIMIT).
+   *
    * @param offset how many rows are skipped from the sorted output.
    *               Must be greater than or equal to 0.
    * @param fetch how many rows are retrieved. Must be greater than or equal to 0.
@@ -2731,7 +2737,7 @@ public abstract class EnumerableDefaults {
         if (offset > 0) {
           // search the key up to (but excluding) which we have to remove entries from the map
           int skipped = 0;
-          TKey until = null;
+          TKey until = (TKey) DUMMY;
           for (Map.Entry<TKey, List<TSource>> e : map.entrySet()) {
             skipped += e.getValue().size();
 
@@ -2747,7 +2753,7 @@ public abstract class EnumerableDefaults {
               break;
             }
           }
-          if (until == null) {
+          if (until == DUMMY) {
             // the offset is bigger than the number of rows in the map
             return Linq4j.emptyEnumerator();
           }
@@ -3484,7 +3490,7 @@ public abstract class EnumerableDefaults {
    * Enumerable&lt;TSource&gt; according to a specified key selector
    * function.
    *
-   * <p>NOTE: Called {@code toDictionary} in LINQ.NET.</p>
+   * <p>NOTE: Called {@code toDictionary} in LINQ.NET.
    */
   public static <TSource, TKey> Map<TKey, TSource> toMap(
       Enumerable<TSource> source, Function1<TSource, TKey> keySelector) {
@@ -3533,9 +3539,11 @@ public abstract class EnumerableDefaults {
       EqualityComparer<TKey> comparer) {
     // Use LinkedHashMap because groupJoin requires order of keys to be
     // preserved.
-    final Map<TKey, TElement> map = new WrapMap<>(
-        // Java 8 cannot infer return type with LinkedHashMap::new is used
-        () -> new LinkedHashMap<Wrapped<TKey>, TElement>(), comparer);
+    // Java 8 cannot infer return type with LinkedHashMap::new is used
+    @SuppressWarnings("Convert2MethodRef")
+    final Map<TKey, TElement> map =
+        new WrapMap<>(() -> new LinkedHashMap<Wrapped<TKey>, TElement>(),
+            comparer);
     try (Enumerator<TSource> os = source.enumerator()) {
       while (os.moveNext()) {
         TSource o = os.current();
@@ -4293,8 +4301,10 @@ public abstract class EnumerableDefaults {
               if (!advanceLeft(left, leftKey)) {
                 done = true;
               }
-              results = new CartesianProductJoinEnumerator<>(resultSelector,
-                  Linq4j.enumerator(lefts), Linq4j.enumerator(Collections.singletonList(null)));
+              results =
+                  new CartesianProductJoinEnumerator<>(resultSelector,
+                      Linq4j.enumerator(lefts),
+                      Linq4j.enumerator(Collections.singletonList(null)));
               return true;
             }
             if (!getLeftEnumerator().moveNext()) {
@@ -4350,8 +4360,10 @@ public abstract class EnumerableDefaults {
                   Linq4j.enumerator(rights));
         } else {
           // we must verify the non equi-join predicate, use nested loop join for that
-          results = nestedLoopJoin(Linq4j.asEnumerable(lefts), Linq4j.asEnumerable(rights),
-              extraPredicate, resultSelector, joinType).enumerator();
+          results =
+              nestedLoopJoin(Linq4j.asEnumerable(lefts),
+                  Linq4j.asEnumerable(rights), extraPredicate, resultSelector,
+                  joinType).enumerator();
         }
         return true;
       }
@@ -4363,6 +4375,7 @@ public abstract class EnumerableDefaults {
      * Clears {@code left} list, adds {@code left} into it, and advance left enumerator,
      * adding all items with the same key to {@code left} list too, until left enumerator
      * is over or a different key is found.
+     *
      * @return {@code true} if there are still elements to be processed on the left enumerator,
      * {@code false} otherwise (left enumerator is over or null key is found).
      */
@@ -4395,6 +4408,7 @@ public abstract class EnumerableDefaults {
      * Clears {@code right} list, adds {@code right} into it, and advance right enumerator,
      * adding all items with the same key to {@code right} list too, until right enumerator
      * is over or a different key is found.
+     *
      * @return {@code true} if there are still elements to be processed on the right enumerator,
      * {@code false} otherwise (right enumerator is over or null key is found).
      */

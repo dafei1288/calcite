@@ -427,9 +427,10 @@ public abstract class RelOptUtil {
         || ((Hintable) originalRel).getHints().size() == 0) {
       return equiv;
     }
-    final RelShuttle shuttle = new SubTreeHintPropagateShuttle(
-        originalRel.getCluster().getHintStrategies(),
-        ((Hintable) originalRel).getHints());
+    final RelShuttle shuttle =
+        new SubTreeHintPropagateShuttle(
+            originalRel.getCluster().getHintStrategies(),
+            ((Hintable) originalRel).getHints());
     return equiv.accept(shuttle);
   }
 
@@ -896,18 +897,15 @@ public abstract class RelOptUtil {
       // No need to create another project node if the rel
       // is already a project.
       final Project project = (Project) rel;
-      castExps = RexUtil.generateCastExpressions(
-          rexBuilder,
-          castRowType,
-          ((Project) rel).getProjects());
+      castExps =
+          RexUtil.generateCastExpressions(rexBuilder, castRowType,
+              ((Project) rel).getProjects());
       input = rel.getInput(0);
       hints = project.getHints();
       correlationVariables = project.getVariablesSet();
     } else {
-      castExps = RexUtil.generateCastExpressions(
-          rexBuilder,
-          castRowType,
-          rowType);
+      castExps =
+          RexUtil.generateCastExpressions(rexBuilder, castRowType, rowType);
       input = rel;
       correlationVariables = ImmutableSet.of();
     }
@@ -961,8 +959,8 @@ public abstract class RelOptUtil {
     for (int i = 0; i < aggCallCnt; i++) {
       aggCalls.add(
           AggregateCall.create(SqlStdOperatorTable.SINGLE_VALUE, false, false,
-              false, ImmutableList.of(i), -1, null, RelCollations.EMPTY, 0, rel,
-              null, null));
+              false, ImmutableList.of(), ImmutableList.of(i), -1,
+              null, RelCollations.EMPTY, 0, rel, null, null));
     }
 
     return LogicalAggregate.create(rel, ImmutableList.of(), ImmutableBitSet.of(),
@@ -1463,6 +1461,7 @@ public abstract class RelOptUtil {
   /**
    * Returns {@link SqlOperator} for given {@link SqlKind} or returns {@code operator}
    * when {@link SqlKind} is not known.
+   *
    * @param kind input kind
    * @param operator default operator value
    * @return SqlOperator for the given kind
@@ -2463,14 +2462,14 @@ public abstract class RelOptUtil {
    * together, and a list of expressions that are preceded by NOT.
    *
    * <p>For example, {@code a AND NOT b AND NOT (c and d) AND TRUE AND NOT
-   * FALSE} returns {@code rexList = [a], notList = [b, c AND d]}.</p>
+   * FALSE} returns {@code rexList = [a], notList = [b, c AND d]}.
    *
    * <p>TRUE and NOT FALSE expressions are ignored. FALSE and NOT TRUE
    * expressions are placed on {@code rexList} and {@code notList} as other
-   * expressions.</p>
+   * expressions.
    *
    * <p>For example, {@code a AND TRUE AND NOT TRUE} returns
-   * {@code rexList = [a], notList = [TRUE]}.</p>
+   * {@code rexList = [a], notList = [TRUE]}.
    *
    * @param rexPredicate predicate to be analyzed
    * @param rexList      list of decomposed RexNodes (except those with NOT)
@@ -2550,7 +2549,7 @@ public abstract class RelOptUtil {
    * Returns a condition decomposed by AND.
    *
    * <p>For example, {@code conjunctions(TRUE)} returns the empty list;
-   * {@code conjunctions(FALSE)} returns list {@code {FALSE}}.</p>
+   * {@code conjunctions(FALSE)} returns list {@code {FALSE}}.
    */
   public static List<RexNode> conjunctions(@Nullable RexNode rexPredicate) {
     final List<RexNode> list = new ArrayList<>();
@@ -2561,7 +2560,7 @@ public abstract class RelOptUtil {
   /**
    * Returns a condition decomposed by OR.
    *
-   * <p>For example, {@code disjunctions(FALSE)} returns the empty list.</p>
+   * <p>For example, {@code disjunctions(FALSE)} returns the empty list.
    */
   public static List<RexNode> disjunctions(RexNode rexPredicate) {
     final List<RexNode> list = new ArrayList<>();
@@ -3198,8 +3197,9 @@ public abstract class RelOptUtil {
   }
 
   private static RexShuttle pushShuttle(final Calc calc) {
-    final List<RexNode> projects = Util.transform(calc.getProgram().getProjectList(),
-        calc.getProgram()::expandLocalRef);
+    final List<RexNode> projects =
+        Util.transform(calc.getProgram().getProjectList(),
+            calc.getProgram()::expandLocalRef);
     return new RexShuttle() {
       @Override public RexNode visitInputRef(RexInputRef ref) {
         return projects.get(ref.getIndex());
@@ -3425,7 +3425,7 @@ public abstract class RelOptUtil {
    * Creates a relational expression that projects the given fields of the
    * input.
    *
-   * <p>Optimizes if the fields are the identity projection.</p>
+   * <p>Optimizes if the fields are the identity projection.
    *
    * @param child   Input relational expression
    * @param posList Source of each projected field
@@ -3492,7 +3492,7 @@ public abstract class RelOptUtil {
    * Creates a relational expression which permutes the output fields of a
    * relational expression according to a permutation.
    *
-   * <p>Optimizations:</p>
+   * <p>Optimizations:
    *
    * <ul>
    * <li>If the relational expression is a
@@ -3741,8 +3741,9 @@ public abstract class RelOptUtil {
     // yet.
     if (!containsGet(joinCond)
         && RexUtil.SubQueryFinder.find(joinCond) == null) {
-      joinCond = pushDownEqualJoinConditions(joinCond, leftCount, rightCount, extraLeftExprs,
-          extraRightExprs, relBuilder.getRexBuilder());
+      joinCond =
+          pushDownEqualJoinConditions(joinCond, leftCount, rightCount,
+              extraLeftExprs, extraRightExprs, relBuilder.getRexBuilder());
     }
 
     relBuilder.push(originalJoin.getLeft());
@@ -3896,8 +3897,8 @@ public abstract class RelOptUtil {
       for (int i = 0; i < operands.size(); i++) {
         RexNode operand = operands.get(i);
         if (operand instanceof RexCall) {
-          operand = collapseExpandedIsNotDistinctFromExpr(
-              (RexCall) operand, builder);
+          operand =
+              collapseExpandedIsNotDistinctFromExpr((RexCall) operand, builder);
         }
         if (node.getKind() == SqlKind.AND
             && operand.getKind() != SqlKind.EQUALS

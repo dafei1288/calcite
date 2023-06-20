@@ -83,9 +83,14 @@ parser: {
     "CURSOR_NAME"
     "DATA"
     "DATABASE"
+    "DATE_DIFF"
     "DATE_TRUNC"
+    "DATETIME_DIFF"
     "DATETIME_INTERVAL_CODE"
     "DATETIME_INTERVAL_PRECISION"
+    "DATETIME_TRUNC"
+    "DAYOFWEEK"
+    "DAYOFYEAR"
     "DAYS"
     "DECADE"
     "DEFAULTS"
@@ -204,6 +209,8 @@ parser: {
     "PASSTHROUGH"
     "PAST"
     "PATH"
+    "PERCENTILE_CONT"
+    "PERCENTILE_DISC"
     "PIVOT"
     "PLACING"
     "PLAN"
@@ -434,7 +441,11 @@ parser: {
   # Example: "parserImpls.ftl".
   implementationFiles: [
   ]
-
+  
+  # Custom identifier token.
+  # Example: "< IDENTIFIER: (<LETTER>|<DIGIT>)+ >".
+  customIdentifierToken: ""
+      
   includePosixOperators: false
   includeCompoundIdentifier: true
   includeBraces: true

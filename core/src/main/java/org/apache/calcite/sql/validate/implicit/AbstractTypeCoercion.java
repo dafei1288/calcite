@@ -34,7 +34,9 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.parser.SqlParserUtil;
+import org.apache.calcite.sql.type.SqlTypeCoercionRule;
 import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.type.SqlTypeMappingRule;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlValidator;
@@ -112,7 +114,8 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
     }
 
     // Check it early.
-    if (!needToCast(scope, operand, targetType)) {
+    if (!needToCast(scope, operand, targetType,
+        SqlTypeCoercionRule.lenientInstance())) {
       return false;
     }
     // Fix up nullable attr.
@@ -229,18 +232,29 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
         Charset charset = fromType.getCharset();
         if (charset != null && SqlTypeUtil.inCharFamily(syncedType)) {
           SqlCollation collation = getCollation(fromType);
-          syncedType = factory.createTypeWithCharsetAndCollation(syncedType,
-              charset,
-              collation);
+          syncedType =
+              factory.createTypeWithCharsetAndCollation(syncedType, charset,
+                  collation);
         }
       }
     }
     return syncedType;
   }
 
-  /** Decide if a SqlNode should be casted to target type, derived class
-   * can override this strategy. */
-  protected boolean needToCast(SqlValidatorScope scope, SqlNode node, RelDataType toType) {
+  /** Returns whether a SqlNode should be cast to a target type.
+   *
+   * <p>The default implementation uses the scope's validator's type mapping
+   * rule to determine validity; a derived class can override this strategy. */
+  protected boolean needToCast(SqlValidatorScope scope, SqlNode node,
+      RelDataType toType) {
+    return needToCast(scope, node, toType,
+        scope.getValidator().getTypeMappingRule());
+  }
+
+  /** Returns whether a SqlNode should be cast to a target type,
+   * using a type mapping rule to determine casting validity. */
+  protected boolean needToCast(SqlValidatorScope scope, SqlNode node,
+      RelDataType toType, SqlTypeMappingRule mappingRule) {
     RelDataType fromType = validator.deriveType(scope, node);
     // This depends on the fact that type validate happens before coercion.
     // We do not have inferred type for some node, i.e. LOCALTIME.
@@ -261,7 +275,8 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
     }
 
     // No need to cast between char and varchar.
-    if (SqlTypeUtil.isCharacter(toType) && SqlTypeUtil.isCharacter(fromType)) {
+    if (SqlTypeUtil.isCharacter(toType)
+        && SqlTypeUtil.isCharacter(fromType)) {
       return false;
     }
 
@@ -279,7 +294,7 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
       return false;
     }
     // Should keep sync with rules in SqlTypeCoercionRule.
-    assert SqlTypeUtil.canCastFrom(toType, fromType, true);
+    assert SqlTypeUtil.canCastFrom(toType, fromType, mappingRule);
     return true;
   }
 
@@ -402,8 +417,9 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
 
     if (SqlTypeUtil.isArray(type1) && SqlTypeUtil.isArray(type2)) {
       if (SqlTypeUtil.equalSansNullability(factory, type1, type2)) {
-        resultType = factory.createTypeWithNullability(type1,
-            type1.isNullable() || type2.isNullable());
+        resultType =
+            factory.createTypeWithNullability(type1,
+                type1.isNullable() || type2.isNullable());
       }
     }
 
@@ -533,7 +549,7 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
       return type2;
     }
 
-    if (validator.config().conformance().allowCoercionStringToArray()) {
+    if (validator.config().conformance().allowLenientCoercion()) {
       if (SqlTypeUtil.isString(type1) && SqlTypeUtil.isArray(type2)) {
         return type2;
       }
@@ -567,8 +583,9 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
     }
     if (null == resultType) {
       if (SqlTypeUtil.isArray(type1) && SqlTypeUtil.isArray(type2)) {
-        RelDataType valType = getWiderTypeForTwo(type1.getComponentType(),
-            type2.getComponentType(), stringPromotion);
+        RelDataType valType =
+            getWiderTypeForTwo(type1.getComponentType(),
+                type2.getComponentType(), stringPromotion);
         if (null != valType) {
           resultType = factory.createArrayType(valType, -1);
         }
@@ -684,14 +701,13 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
    * @return common type of implicit cast, null if we do not find any
    */
   public @Nullable RelDataType implicitCast(RelDataType in, SqlTypeFamily expected) {
-    List<SqlTypeFamily> numericFamilies = ImmutableList.of(
-        SqlTypeFamily.NUMERIC,
-        SqlTypeFamily.DECIMAL,
-        SqlTypeFamily.APPROXIMATE_NUMERIC,
-        SqlTypeFamily.EXACT_NUMERIC,
-        SqlTypeFamily.INTEGER);
-    List<SqlTypeFamily> dateTimeFamilies = ImmutableList.of(SqlTypeFamily.DATE,
-        SqlTypeFamily.TIME, SqlTypeFamily.TIMESTAMP);
+    List<SqlTypeFamily> numericFamilies =
+        ImmutableList.of(SqlTypeFamily.NUMERIC, SqlTypeFamily.DECIMAL,
+            SqlTypeFamily.APPROXIMATE_NUMERIC, SqlTypeFamily.EXACT_NUMERIC,
+            SqlTypeFamily.INTEGER);
+    List<SqlTypeFamily> dateTimeFamilies =
+        ImmutableList.of(SqlTypeFamily.DATE, SqlTypeFamily.TIME,
+            SqlTypeFamily.TIMESTAMP);
     // If the expected type is already a parent of the input type, no need to cast.
     if (expected.getTypeNames().contains(in.getSqlTypeName())) {
       return in;
@@ -753,13 +769,14 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
       int index,
       RelDataType fromType,
       RelDataType targetType) {
-    if (validator.config().conformance().allowCoercionStringToArray()
+    if (validator.config().conformance().allowLenientCoercion()
         && SqlTypeUtil.isString(fromType)
         && SqlTypeUtil.isArray(targetType)
         && operand instanceof SqlCharStringLiteral) {
       try {
-        SqlNode arrayValue = SqlParserUtil.parseArrayLiteral(
-            ((SqlCharStringLiteral) operand).getValueAs(String.class));
+        SqlNode arrayValue =
+            SqlParserUtil.parseArrayLiteral(
+                ((SqlCharStringLiteral) operand).getValueAs(String.class));
         call.setOperand(index, arrayValue);
         updateInferredType(arrayValue, targetType);
       } catch (SqlParseException e) {

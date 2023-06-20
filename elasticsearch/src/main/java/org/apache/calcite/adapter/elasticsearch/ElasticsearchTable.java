@@ -305,11 +305,12 @@ public class ElasticsearchTable extends AbstractQueryableTable implements Transl
   }
 
   @Override public RelDataType getRowType(RelDataTypeFactory relDataTypeFactory) {
-    final RelDataType mapType = relDataTypeFactory.createMapType(
-        relDataTypeFactory.createSqlType(SqlTypeName.VARCHAR),
-        relDataTypeFactory.createTypeWithNullability(
-            relDataTypeFactory.createSqlType(SqlTypeName.ANY),
-            true));
+    final RelDataType mapType =
+        relDataTypeFactory.createMapType(
+            relDataTypeFactory.createSqlType(SqlTypeName.VARCHAR),
+            relDataTypeFactory.createTypeWithNullability(
+                relDataTypeFactory.createSqlType(SqlTypeName.ANY),
+                true));
     return relDataTypeFactory.builder().add("_MAP", mapType).build();
   }
 
@@ -349,6 +350,7 @@ public class ElasticsearchTable extends AbstractQueryableTable implements Transl
     }
 
     /** Called via code-generation.
+     *
      * @param ops list of queries (as strings)
      * @param fields projection
      * @see ElasticsearchMethod#ELASTICSEARCH_QUERYABLE_FIND

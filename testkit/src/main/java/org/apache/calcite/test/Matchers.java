@@ -30,7 +30,6 @@ import com.google.common.collect.RangeSet;
 
 import org.apiguardian.api.API;
 import org.hamcrest.BaseMatcher;
-import org.hamcrest.CoreMatchers;
 import org.hamcrest.CustomTypeSafeMatcher;
 import org.hamcrest.Description;
 import org.hamcrest.Matcher;
@@ -288,24 +287,27 @@ public class Matchers {
    * <p>This method is necessary because {@link RangeSet#toString()} changed
    * behavior. Guava 19 - 28 used a unicode symbol; Guava 29 onwards uses "..".
    */
-  @SuppressWarnings("BetaApi")
+  @SuppressWarnings({"BetaApi", "rawtypes"})
   public static Matcher<RangeSet> isRangeSet(final String value) {
-    return compose(Is.is(value), input -> {
-      // Change all '\u2025' (a unicode symbol denoting a range) to '..',
-      // consistent with Guava 29+.
-      return input.toString().replace("\u2025", "..");
-    });
+    return compose(Is.is(value), input -> sanitizeRangeSet(input.toString()));
+  }
+
+  /** Changes all '\u2025' (a unicode symbol denoting a range) to '..',
+   * consistent with Guava 29+. */
+  public static String sanitizeRangeSet(String string) {
+    return string.replace("\u2025", "..");
   }
 
   /**
    * Creates a {@link Matcher} that matches execution plan and trims {@code , id=123} node ids.
    * {@link RelNode#getId()} is not stable across runs, so this matcher enables to trim those.
+   *
    * @param value execpted execution plan
    * @return matcher
    */
   @API(since = "1.22", status = API.Status.EXPERIMENTAL)
   public static Matcher<String> containsWithoutNodeIds(String value) {
-    return compose(CoreMatchers.containsString(value), Matchers::trimNodeIds);
+    return compose(StringContains.containsString(value), Matchers::trimNodeIds);
   }
 
   /**
@@ -325,7 +327,7 @@ public class Matchers {
    * @see Util#toLinux(String)
    */
   public static Matcher<String> containsStringLinux(String value) {
-    return compose(CoreMatchers.containsString(value), Util::toLinux);
+    return compose(StringContains.containsString(value), Util::toLinux);
   }
 
   public static String trimNodeIds(String s) {
@@ -378,7 +380,7 @@ public class Matchers {
    * Matcher that succeeds for any collection that, when converted to strings
    * and sorted on those strings, matches the given reference string.
    *
-   * <p>Use it as an alternative to {@link CoreMatchers#is} if items in your
+   * <p>Use it as an alternative to {@link Is#is} if items in your
    * list might occur in any order.
    *
    * <p>For example:

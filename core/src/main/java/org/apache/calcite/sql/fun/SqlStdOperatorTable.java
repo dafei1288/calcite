@@ -80,6 +80,7 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import static org.apache.calcite.linq4j.Nullness.castNonNull;
 
@@ -197,7 +198,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
   public static final SqlSpecialOperator DEFAULT = new SqlDefaultOperator();
 
   /** <code>FILTER</code> operator filters which rows are included in an
-   *  aggregate function. */
+   * aggregate function. */
   public static final SqlFilterOperator FILTER = new SqlFilterOperator();
 
   /** <code>WITHIN_GROUP</code> operator performs aggregations on ordered data input. */
@@ -477,6 +478,21 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
 
   public static final SqlQuantifyOperator ALL_NE =
       new SqlQuantifyOperator(SqlKind.ALL, SqlKind.NOT_EQUALS);
+
+  public static final List<SqlQuantifyOperator> QUANTIFY_OPERATORS =
+      ImmutableList.of(SqlStdOperatorTable.SOME_EQ,
+          SqlStdOperatorTable.SOME_GT,
+          SqlStdOperatorTable.SOME_GE,
+          SqlStdOperatorTable.SOME_LE,
+          SqlStdOperatorTable.SOME_LT,
+          SqlStdOperatorTable.SOME_NE,
+
+          SqlStdOperatorTable.ALL_EQ,
+          SqlStdOperatorTable.ALL_GT,
+          SqlStdOperatorTable.ALL_GE,
+          SqlStdOperatorTable.ALL_LE,
+          SqlStdOperatorTable.ALL_LT,
+          SqlStdOperatorTable.ALL_NE);
 
   /**
    * Logical less-than operator, '<code>&lt;</code>'.
@@ -1292,7 +1308,7 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    * &lt;interval qualifier&gt;</code></blockquote>
    *
    * <p>This operator is special since it needs to hold the
-   * additional interval qualifier specification.</p>
+   * additional interval qualifier specification.
    */
   public static final SqlDatetimeSubtractionOperator MINUS_DATE =
       new SqlDatetimeSubtractionOperator("-", ReturnTypes.ARG2_NULLABLE);
@@ -1560,25 +1576,35 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
       SqlBasicFunction.create("REPLACE", ReturnTypes.ARG0_NULLABLE_VARYING,
           OperandTypes.STRING_STRING_STRING, SqlFunctionCategory.STRING);
 
+  /** The {@code CONVERT(charValue, srcCharsetName, destCharsetName)}
+   * function converts {@code charValue} with {@code destCharsetName},
+   * whose original encoding is specified by {@code srcCharsetName}.
+   *
+   * <p>The SQL standard defines
+   * {@code CONVERT(charValue USING transcodingName)}, and MySQL implements it;
+   * Calcite supports this in the following TRANSLATE function.
+   *
+   * <p>MySQL and Microsoft SQL Server have a {@code CONVERT(type, value)}
+   * function; Calcite does not currently support this, either. */
   public static final SqlFunction CONVERT =
       new SqlConvertFunction("CONVERT");
 
   /**
-   * The <code>TRANSLATE(<i>char_value</i> USING <i>translation_name</i>)</code> function
-   * alters the character set of a string value from one base character set to another.
+   * The <code>TRANSLATE/CONVERT(<i>char_value</i> USING <i>transcodingName</i>)</code> function
+   * alters the character set of a string value from one base character set to transcodingName.
    *
    * <p>It is defined in the SQL standard. See also the non-standard
    * {@link SqlLibraryOperators#TRANSLATE3}, which has a different purpose.
    */
   public static final SqlFunction TRANSLATE =
-      new SqlConvertFunction("TRANSLATE");
+      new SqlTranslateFunction("TRANSLATE");
 
   public static final SqlFunction OVERLAY = new SqlOverlayFunction();
 
   /** The "TRIM" function. */
   public static final SqlFunction TRIM = SqlTrimFunction.INSTANCE;
 
-  public static final SqlFunction POSITION = new SqlPositionFunction();
+  public static final SqlFunction POSITION = new SqlPositionFunction("POSITION");
 
   public static final SqlBasicFunction CHAR_LENGTH =
       SqlBasicFunction.create("CHAR_LENGTH",
@@ -1947,17 +1973,17 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    * <p>When the CAST operator is applies as a {@link SqlCall}, it has two
    * arguments: the expression and the type. The type must not include a
    * constraint, so <code>CAST(x AS INTEGER NOT NULL)</code>, for instance, is
-   * invalid.</p>
+   * invalid.
    *
    * <p>When the CAST operator is applied as a <code>RexCall</code>, the
    * target type is simply stored as the return type, not an explicit operand.
    * For example, the expression <code>CAST(1 + 2 AS DOUBLE)</code> will
    * become a call to <code>CAST</code> with the expression <code>1 + 2</code>
-   * as its only operand.</p>
+   * as its only operand.
    *
    * <p>The <code>RexCall</code> form can also have a type which contains a
    * <code>NOT NULL</code> constraint. When this expression is implemented, if
-   * the value is NULL, an exception will be thrown.</p>
+   * the value is NULL, an exception will be thrown.
    */
   public static final SqlFunction CAST = new SqlCastFunction();
 
@@ -2083,11 +2109,12 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    * <p>The SQL standard calls the ARRAY variant a
    * &lt;array element reference&gt;. Index is 1-based. The standard says
    * to raise "data exception - array element error" but we currently return
-   * null.</p>
+   * null.
    *
-   * <p>MAP is not standard SQL.</p>
+   * <p>MAP is not standard SQL.
    */
-  public static final SqlOperator ITEM = new SqlItemOperator();
+  public static final SqlOperator ITEM =
+      new SqlItemOperator("ITEM", OperandTypes.ARRAY_OR_MAP, 1, true);
 
   /**
    * The ARRAY Value Constructor. e.g. "<code>ARRAY[1, 2, 3]</code>".
@@ -2136,11 +2163,11 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
    * to keep types consistent. For example, <code>ELEMENT(MULTISET [5])</code>
    * is translated to <code>$ELEMENT_SLICE(MULTISET (VALUES ROW (5
    * EXPR$0))</code> It is translated away when the multiset type is converted
-   * back to scalar values.</p>
+   * back to scalar values.
    *
    * <p>NOTE: jhyde, 2006/1/9: Usages of this operator are commented out, but
    * I'm not deleting the operator, because some multiset tests are disabled,
-   * and we may need this operator to get them working!</p>
+   * and we may need this operator to get them working!
    */
   public static final SqlInternalOperator ELEMENT_SLICE =
       new SqlInternalOperator(
@@ -2550,33 +2577,37 @@ public class SqlStdOperatorTable extends ReflectiveSqlOperatorTable {
     final SqlOperator op = call.getOperator();
     if (op instanceof SqlGroupedWindowFunction
         && op.isGroupAuxiliary()) {
-      SqlGroupedWindowFunction groupFunction = ((SqlGroupedWindowFunction) op).groupFunction;
-      return copy(call, requireNonNull(groupFunction, "groupFunction"));
+      final SqlGroupedWindowFunction fun = (SqlGroupedWindowFunction) op;
+      return copy(call, requireNonNull(fun.groupFunction, "groupFunction"));
     }
     return null;
   }
 
   /** Converts a call to a grouped window function to a call to its auxiliary
-   * window function(s). For other calls returns null.
+   * window function(s). */
+  @Deprecated // to be removed before 2.0
+  public static List<Pair<SqlNode, AuxiliaryConverter>> convertGroupToAuxiliaryCalls(
+      SqlCall call) {
+    ImmutableList.Builder<Pair<SqlNode, AuxiliaryConverter>> builder =
+        ImmutableList.builder();
+    convertGroupToAuxiliaryCalls(call, (k, v) -> builder.add(Pair.of(k, v)));
+    return builder.build();
+  }
+
+  /** Converts a call to a grouped window function to a call to its auxiliary
+   * window function(s).
    *
    * <p>For example, converts {@code TUMBLE_START(rowtime, INTERVAL '1' HOUR))}
    * to {@code TUMBLE(rowtime, INTERVAL '1' HOUR))}. */
-  public static List<Pair<SqlNode, AuxiliaryConverter>> convertGroupToAuxiliaryCalls(
-      SqlCall call) {
+  public static void convertGroupToAuxiliaryCalls(SqlCall call,
+      BiConsumer<SqlNode, AuxiliaryConverter> consumer) {
     final SqlOperator op = call.getOperator();
     if (op instanceof SqlGroupedWindowFunction
         && op.isGroup()) {
-      ImmutableList.Builder<Pair<SqlNode, AuxiliaryConverter>> builder =
-          ImmutableList.builder();
-      for (final SqlGroupedWindowFunction f
-          : ((SqlGroupedWindowFunction) op).getAuxiliaryFunctions()) {
-        builder.add(
-            Pair.of(copy(call, f),
-                new AuxiliaryConverter.Impl(f)));
-      }
-      return builder.build();
+      final SqlGroupedWindowFunction fun = (SqlGroupedWindowFunction) op;
+      fun.getAuxiliaryFunctions().forEach(f ->
+          consumer.accept(copy(call, f), new AuxiliaryConverter.Impl(f)));
     }
-    return ImmutableList.of();
   }
 
   /** Creates a copy of a call with a new operator. */

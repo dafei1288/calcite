@@ -30,14 +30,25 @@ data: {
       "org.apache.calcite.sql.SqlCreate",
       "org.apache.calcite.sql.babel.SqlBabelCreateTable",
       "org.apache.calcite.sql.babel.TableCollectionType",
+      "org.apache.calcite.sql.babel.postgresql.AndChain",
+      "org.apache.calcite.sql.babel.postgresql.SqlBegin",
+      "org.apache.calcite.sql.babel.postgresql.SqlCommit",
+      "org.apache.calcite.sql.babel.postgresql.SqlDiscard",
+      "org.apache.calcite.sql.babel.postgresql.SqlRollback",
+      "org.apache.calcite.sql.babel.postgresql.SqlShow",
       "org.apache.calcite.sql.ddl.SqlDdlNodes",
     ]
 
     # List of new keywords. Example: "DATABASES", "TABLES". If the keyword is
     # not a reserved keyword, add it to the 'nonReservedKeywords' section.
     keywords: [
+      "DISCARD"
       "IF"
+      "PLANS"
+      "SEED"
       "SEMI"
+      "SEQUENCES"
+      "TEMP"
       "VOLATILE"
     ]
 
@@ -45,8 +56,13 @@ data: {
     # items in this list become non-reserved
     nonReservedKeywordsToAdd: [
       # not in core, added in babel
+      "DISCARD"
       "IF"
+      "PLANS"
+      "SEED"
       "SEMI"
+      "SEQUENCES"
+      "TEMP"
 
       # The following keywords are reserved in core Calcite,
       # are reserved in some version of SQL,
@@ -157,6 +173,7 @@ data: {
       "CYCLE"
       "DATA"
 #     "DATE"
+      "DATETIME_DIFF"
       "DAY"
       "DEALLOCATE"
       "DEC"
@@ -543,6 +560,15 @@ data: {
     createStatementParserMethods: [
       "SqlCreateTable"
     ]
+    
+    statementParserMethods: [
+      "PostgresqlSqlShow()",
+      "PostgresqlSqlSetOption()",
+      "PostgresqlSqlBegin()",
+      "PostgresqlSqlDiscard()",
+      "PostgresqlSqlCommit()",
+      "PostgresqlSqlRollback()"
+    ]
 
     # Binary operators tokens.
     # Example: "< INFIX_CAST: \"::\" >".
@@ -551,6 +577,18 @@ data: {
       "< NULL_SAFE_EQUAL: \"<=>\" >"
     ]
 
+    # Custom identifier token.
+    # 
+    # PostgreSQL allows letters with diacritical marks and non-Latin letters 
+    # in the beginning of identifier and additionally dollar sign in the rest of identifier. 
+    # Letters with diacritical marks and non-Latin letters
+    # are represented by character codes 128 to 255 (or in octal \200 to \377).
+    # See https://learn.microsoft.com/en-gb/office/vba/language/reference/user-interface-help/character-set-128255
+    # See https://github.com/postgres/postgres/blob/master/src/backend/parser/scan.l
+    #
+    # MySQL allows digit in the beginning of identifier
+    customIdentifierToken: "< IDENTIFIER: (<LETTER>|<DIGIT>|[\"\\200\"-\"\\377\"]) (<LETTER>|<DIGIT>|<DOLLAR>|[\"\\200\"-\"\\377\"])* >"
+    
     # Binary operators initialization.
     # Example: "InfixCast".
     extraBinaryExpressions: [
@@ -565,6 +603,7 @@ data: {
     # Example: "parserImpls.ftl".
     implementationFiles: [
       "parserImpls.ftl"
+      "parserPostgresqlImpls.ftl"
     ]
 
     includePosixOperators: true

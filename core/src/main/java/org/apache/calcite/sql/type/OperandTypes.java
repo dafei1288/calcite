@@ -20,8 +20,8 @@ import org.apache.calcite.avatica.util.TimeUnitRange;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.calcite.rel.type.TimeFrames;
 import org.apache.calcite.sql.SqlCallBinding;
+import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperandCountRange;
@@ -70,38 +70,6 @@ import static java.util.Objects.requireNonNull;
  * @see org.apache.calcite.sql.type.InferTypes
  */
 public abstract class OperandTypes {
-  private static final Set<TimeUnitRange> TIME_UNITS =
-      ImmutableSet.of(TimeUnitRange.HOUR,
-          TimeUnitRange.MINUTE,
-          TimeUnitRange.SECOND);
-
-  private static final Set<TimeUnitRange> MONTH_UNITS =
-      ImmutableSet.of(TimeUnitRange.MILLENNIUM,
-          TimeUnitRange.CENTURY,
-          TimeUnitRange.DECADE,
-          TimeUnitRange.YEAR,
-          TimeUnitRange.ISOYEAR,
-          TimeUnitRange.QUARTER,
-          TimeUnitRange.MONTH);
-
-  private static final Set<TimeUnitRange> DAY_UNITS =
-      ImmutableSet.of(TimeUnitRange.WEEK,
-          TimeUnitRange.DAY);
-
-  private static final Set<TimeUnitRange> DATE_UNITS =
-      ImmutableSet.<TimeUnitRange>builder()
-          .addAll(MONTH_UNITS).addAll(DAY_UNITS).build();
-
-  private static final Set<TimeUnitRange> TIMESTAMP_UNITS =
-      ImmutableSet.<TimeUnitRange>builder()
-          .addAll(DATE_UNITS).addAll(TIME_UNITS).build();
-
-  private static final Set<String> WEEK_FRAMES =
-      ImmutableSet.<String>builder()
-          .addAll(TimeFrames.WEEK_FRAME_NAMES)
-          .add("ISOWEEK")
-          .add("WEEK")
-          .build();
 
   private OperandTypes() {
   }
@@ -157,17 +125,14 @@ public abstract class OperandTypes {
    * WEEK_WEDNESDAY, etc.)
    */
   public static SqlSingleOperandTypeChecker dateInterval() {
-    return new IntervalOperandTypeChecker(intervalQualifier ->
-        DATE_UNITS.contains(intervalQualifier.timeUnitRange)
-            || WEEK_FRAMES.contains(intervalQualifier.timeFrameName));
+    return new IntervalOperandTypeChecker(SqlIntervalQualifier::isDate);
   }
 
   /**
    * Creates a checker for TIME intervals (HOUR, SECOND, etc.)
    */
   public static SqlSingleOperandTypeChecker timeInterval() {
-    return new IntervalOperandTypeChecker(intervalQualifier ->
-        TIME_UNITS.contains(intervalQualifier.timeUnitRange));
+    return new IntervalOperandTypeChecker(SqlIntervalQualifier::isTime);
   }
 
   /**
@@ -175,9 +140,7 @@ public abstract class OperandTypes {
    * WEEK_WEDNESDAY, HOUR, SECOND, etc.)
    */
   public static SqlSingleOperandTypeChecker timestampInterval() {
-    return new IntervalOperandTypeChecker(intervalQualifier ->
-        TIMESTAMP_UNITS.contains(intervalQualifier.timeUnitRange)
-            || WEEK_FRAMES.contains(intervalQualifier.timeFrameName));
+    return new IntervalOperandTypeChecker(SqlIntervalQualifier::isTimestamp);
   }
 
   /**
@@ -391,6 +354,11 @@ public abstract class OperandTypes {
   public static final SqlSingleOperandTypeChecker INTEGER =
       family(SqlTypeFamily.INTEGER);
 
+  public static final SqlSingleOperandTypeChecker NUMERIC_OPTIONAL_NUMERIC =
+      family(ImmutableList.of(SqlTypeFamily.NUMERIC, SqlTypeFamily.NUMERIC),
+          // Second operand optional (operand index 0, 1)
+          number -> number == 1);
+
   public static final SqlSingleOperandTypeChecker NUMERIC_OPTIONAL_INTEGER =
       family(ImmutableList.of(SqlTypeFamily.NUMERIC, SqlTypeFamily.INTEGER),
           // Second operand optional (operand index 0, 1)
@@ -411,11 +379,20 @@ public abstract class OperandTypes {
   public static final SqlSingleOperandTypeChecker BINARY =
       family(SqlTypeFamily.BINARY);
 
+  public static final SqlSingleOperandTypeChecker BINARY_BINARY =
+      family(SqlTypeFamily.BINARY, SqlTypeFamily.BINARY);
+
   public static final SqlSingleOperandTypeChecker STRING =
       family(SqlTypeFamily.STRING);
 
   public static final FamilyOperandTypeChecker STRING_STRING =
       family(SqlTypeFamily.STRING, SqlTypeFamily.STRING);
+
+  public static final FamilyOperandTypeChecker STRING_OPTIONAL_STRING =
+      family(
+          ImmutableList.of(SqlTypeFamily.STRING, SqlTypeFamily.STRING),
+          // Second operand optional (operand index 0, 1)
+          number -> number == 1);
 
   public static final FamilyOperandTypeChecker STRING_STRING_STRING =
       family(SqlTypeFamily.STRING, SqlTypeFamily.STRING, SqlTypeFamily.STRING);
@@ -449,6 +426,9 @@ public abstract class OperandTypes {
   public static final SqlSingleOperandTypeChecker TIMESTAMP =
       family(SqlTypeFamily.TIMESTAMP);
 
+  public static final SqlSingleOperandTypeChecker DATE_OR_TIMESTAMP =
+      DATE.or(TIMESTAMP);
+
   /** Type-checker that matches "TIMESTAMP WITH LOCAL TIME ZONE" but not other
    * members of the "TIMESTAMP" family (e.g. "TIMESTAMP"). */
   public static final SqlSingleOperandTypeChecker TIMESTAMP_LTZ =
@@ -468,6 +448,12 @@ public abstract class OperandTypes {
   public static final SqlSingleOperandTypeChecker CHARACTER_CHARACTER_DATETIME =
       family(SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER, SqlTypeFamily.DATETIME);
 
+  public static final SqlSingleOperandTypeChecker CHARACTER_DATE =
+      family(SqlTypeFamily.CHARACTER, SqlTypeFamily.DATE);
+
+  public static final SqlSingleOperandTypeChecker CHARACTER_TIME =
+      family(SqlTypeFamily.CHARACTER, SqlTypeFamily.TIME);
+
   public static final SqlSingleOperandTypeChecker PERIOD =
       new PeriodOperandTypeChecker();
 
@@ -482,6 +468,39 @@ public abstract class OperandTypes {
 
   public static final SqlSingleOperandTypeChecker ARRAY =
       family(SqlTypeFamily.ARRAY);
+
+  public static final SqlSingleOperandTypeChecker ARRAY_OR_MAP =
+      OperandTypes.family(SqlTypeFamily.ARRAY)
+          .or(OperandTypes.family(SqlTypeFamily.MAP))
+          .or(OperandTypes.family(SqlTypeFamily.ANY));
+
+  public static final SqlOperandTypeChecker STRING_ARRAY_CHARACTER_OPTIONAL_CHARACTER =
+      new FamilyOperandTypeChecker(
+          ImmutableList.of(SqlTypeFamily.ARRAY, SqlTypeFamily.CHARACTER, SqlTypeFamily.CHARACTER),
+          i -> i == 2) {
+        @SuppressWarnings("argument.type.incompatible")
+        @Override public boolean checkOperandTypes(
+            SqlCallBinding callBinding,
+            boolean throwOnFailure) {
+          if (!super.checkOperandTypes(callBinding, throwOnFailure)) {
+            return false;
+          }
+          RelDataType elementType = callBinding.getOperandType(0).getComponentType();
+          if (elementType == null || !SqlTypeUtil.isString(elementType)) {
+            if (throwOnFailure) {
+              throw callBinding.newValidationSignatureError();
+            }
+            return false;
+          }
+          return true;
+        }
+
+        @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+          return opName + "(<STRING ARRAY>, <CHARACTER>[, <CHARACTER>])";
+        }
+      };
+
+
   /** Checks that returns whether a value is a multiset or an array.
    * Cf Java, where list and set are collections but a map is not. */
   public static final SqlSingleOperandTypeChecker COLLECTION =
@@ -491,6 +510,12 @@ public abstract class OperandTypes {
       family(SqlTypeFamily.MULTISET)
           .or(family(SqlTypeFamily.ARRAY))
           .or(family(SqlTypeFamily.MAP));
+
+  public static final SqlSingleOperandTypeChecker MAP =
+      family(SqlTypeFamily.MAP);
+
+  public static final SqlOperandTypeChecker ARRAY_ELEMENT =
+      new ArrayElementOperandTypeChecker();
 
   /**
    * Operand type-checking strategy where type must be a literal or NULL.
@@ -505,6 +530,71 @@ public abstract class OperandTypes {
       new LiteralOperandTypeChecker(false);
 
   /**
+   * Operand type-checking strategy type must be a boolean non-NULL literal.
+   */
+  public static final SqlSingleOperandTypeChecker BOOLEAN_LITERAL =
+      new FamilyOperandTypeChecker(ImmutableList.of(SqlTypeFamily.BOOLEAN),
+          i -> false) {
+        @Override public boolean checkSingleOperandType(
+            SqlCallBinding callBinding,
+            SqlNode operand,
+            int iFormalOperand,
+            boolean throwOnFailure) {
+          if (!LITERAL.checkSingleOperandType(
+              callBinding,
+              operand,
+              iFormalOperand,
+              throwOnFailure)) {
+            return false;
+          }
+
+          if (!super.checkSingleOperandType(
+              callBinding,
+              operand,
+              iFormalOperand,
+              throwOnFailure)) {
+            return false;
+          }
+
+          final SqlLiteral arg = (SqlLiteral) operand;
+          final boolean isBooleanLiteral =
+              SqlLiteral.valueMatchesType(arg.getValue(), SqlTypeName.BOOLEAN);
+
+          if (!isBooleanLiteral) {
+            if (throwOnFailure) {
+              throw callBinding.newError(
+                  RESOURCE.argumentMustBeBooleanLiteral(
+                      callBinding.getOperator().getName()));
+            }
+            return false;
+          }
+          return true;
+        }
+      };
+
+  /**
+   * Operand type-checking strategy where the first operand must be array and
+   * the second operand must be a boolean non-NULL literal.
+   */
+  public static final SqlSingleOperandTypeChecker
+      ARRAY_BOOLEAN_LITERAL =
+      new FamilyOperandTypeChecker(
+          ImmutableList.of(SqlTypeFamily.ARRAY, SqlTypeFamily.BOOLEAN),
+          i -> false) {
+        @Override public boolean checkSingleOperandType(
+            SqlCallBinding callBinding, SqlNode operand,
+            int iFormalOperand, boolean throwOnFailure) {
+          if (iFormalOperand == 0) {
+            return super.checkSingleOperandType(callBinding, operand,
+                iFormalOperand, throwOnFailure);
+          }
+
+          return BOOLEAN_LITERAL.checkSingleOperandType(
+              callBinding, operand, 0, throwOnFailure);
+        }
+      };
+
+  /**
    * Operand type-checking strategy type must be a positive integer non-NULL
    * literal.
    */
@@ -513,12 +603,12 @@ public abstract class OperandTypes {
           i -> false) {
         @Override public boolean checkSingleOperandType(
             SqlCallBinding callBinding,
-            SqlNode node,
+            SqlNode operand,
             int iFormalOperand,
             boolean throwOnFailure) {
           if (!LITERAL.checkSingleOperandType(
               callBinding,
-              node,
+              operand,
               iFormalOperand,
               throwOnFailure)) {
             return false;
@@ -526,13 +616,13 @@ public abstract class OperandTypes {
 
           if (!super.checkSingleOperandType(
               callBinding,
-              node,
+              operand,
               iFormalOperand,
               throwOnFailure)) {
             return false;
           }
 
-          final SqlLiteral arg = (SqlLiteral) node;
+          final SqlLiteral arg = (SqlLiteral) operand;
           final BigDecimal value = arg.getValueAs(BigDecimal.class);
           if (value.compareTo(BigDecimal.ZERO) < 0
               || hasFractionalPart(value)) {
@@ -562,34 +652,26 @@ public abstract class OperandTypes {
       };
 
   /**
-   * Operand type-checking strategy type must be a numeric non-NULL
-   * literal in the range 0 and 1 inclusive.
+   * Operand type-checking strategy where type must be a numeric non-NULL
+   * literal in the range 0 to 1 inclusive.
    */
   public static final SqlSingleOperandTypeChecker UNIT_INTERVAL_NUMERIC_LITERAL =
       new FamilyOperandTypeChecker(ImmutableList.of(SqlTypeFamily.NUMERIC),
           i -> false) {
         @Override public boolean checkSingleOperandType(
-            SqlCallBinding callBinding,
-            SqlNode node,
-            int iFormalOperand,
-            boolean throwOnFailure) {
-          if (!LITERAL.checkSingleOperandType(
-              callBinding,
-              node,
-              iFormalOperand,
-              throwOnFailure)) {
+            SqlCallBinding callBinding, SqlNode operand,
+            int iFormalOperand, boolean throwOnFailure) {
+          if (!LITERAL.checkSingleOperandType(callBinding, operand,
+              iFormalOperand, throwOnFailure)) {
             return false;
           }
 
-          if (!super.checkSingleOperandType(
-              callBinding,
-              node,
-              iFormalOperand,
-              throwOnFailure)) {
+          if (!super.checkSingleOperandType(callBinding, operand,
+              iFormalOperand, throwOnFailure)) {
             return false;
           }
 
-          final SqlLiteral arg = (SqlLiteral) node;
+          final SqlLiteral arg = (SqlLiteral) operand;
           final BigDecimal value = arg.getValueAs(BigDecimal.class);
           if (value.compareTo(BigDecimal.ZERO) < 0
               || value.compareTo(BigDecimal.ONE) > 0) {
@@ -601,6 +683,29 @@ public abstract class OperandTypes {
             return false;
           }
           return true;
+        }
+      };
+
+  /**
+   * Operand type-checking strategy where the first operand must be numeric and
+   * the second operand must be a numeric non-NULL literal in the range 0 to 1
+   * inclusive.
+   */
+  public static final SqlSingleOperandTypeChecker
+      NUMERIC_UNIT_INTERVAL_NUMERIC_LITERAL =
+      new FamilyOperandTypeChecker(
+          ImmutableList.of(SqlTypeFamily.NUMERIC, SqlTypeFamily.NUMERIC),
+          i -> false) {
+        @Override public boolean checkSingleOperandType(
+            SqlCallBinding callBinding, SqlNode operand,
+            int iFormalOperand, boolean throwOnFailure) {
+          if (iFormalOperand == 0) {
+            return super.checkSingleOperandType(callBinding, operand,
+                iFormalOperand, throwOnFailure);
+          }
+
+          return UNIT_INTERVAL_NUMERIC_LITERAL.checkSingleOperandType(
+              callBinding, operand, 0, throwOnFailure);
         }
       };
 
@@ -789,10 +894,8 @@ public abstract class OperandTypes {
               throwOnFailure)) {
             return false;
           }
-          // Scope is non-null at validate time, which is when we need to make
-          // this check.
-          final @Nullable SqlValidatorScope scope = callBinding.getScope();
-          if (scope != null && !scope.isMeasureRef(node)) {
+          final SqlValidatorScope scope = callBinding.getScope();
+          if (!scope.isMeasureRef(node)) {
             if (throwOnFailure) {
               throw callBinding.newValidationError(
                   RESOURCE.argumentMustBeMeasure(
@@ -834,6 +937,9 @@ public abstract class OperandTypes {
 
   public static final SqlSingleOperandTypeChecker DATETIME_INTERVAL =
       family(SqlTypeFamily.DATETIME, SqlTypeFamily.DATETIME_INTERVAL);
+
+  public static final SqlSingleOperandTypeChecker TIMESTAMP_STRING =
+      family(SqlTypeFamily.TIMESTAMP, SqlTypeFamily.STRING);
 
   public static final SqlSingleOperandTypeChecker DATETIME_INTERVAL_INTERVAL =
       family(SqlTypeFamily.DATETIME, SqlTypeFamily.DATETIME_INTERVAL,

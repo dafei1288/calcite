@@ -26,6 +26,7 @@ import org.apache.calcite.plan.volcano.RelSubset;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rel.core.Correlate;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Intersect;
 import org.apache.calcite.rel.core.Join;
@@ -37,6 +38,7 @@ import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.core.Union;
 import org.apache.calcite.rel.core.Values;
 import org.apache.calcite.rel.logical.LogicalValues;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.tools.RelBuilder;
@@ -130,7 +132,7 @@ public abstract class PruneEmptyRules {
       return ((Values) node).getTuples().isEmpty();
     }
     if (node instanceof HepRelVertex) {
-      return isEmpty(((HepRelVertex) node).getCurrentRel());
+      return isEmpty(node.stripped());
     }
     // Note: relation input might be a RelSubset, so we just iterate over the relations
     // in order to check if the subset is equivalent to an empty relation.
@@ -150,8 +152,9 @@ public abstract class PruneEmptyRules {
    * Rule that converts a {@link org.apache.calcite.rel.core.TableScan}
    * to empty if the table has no rows in it.
    *
-   * The rule exploits the {@link org.apache.calcite.rel.metadata.RelMdMaxRowCount} to derive if
-   * the table is empty or not.
+   * <p>The rule exploits the
+   * {@link org.apache.calcite.rel.metadata.RelMdMaxRowCount} to derive if the
+   * table is empty or not.
    */
   public static final RelOptRule EMPTY_TABLE_INSTANCE =
       ImmutableZeroMaxRowsRuleConfig.DEFAULT.toRule();
@@ -258,11 +261,45 @@ public abstract class PruneEmptyRules {
   public static final RelOptRule JOIN_RIGHT_INSTANCE =
       JoinRightEmptyRuleConfig.DEFAULT.toRule();
 
-  /** Planner rule that converts a single-rel (e.g. project, sort, aggregate or
-   * filter) on top of the empty relational expression into empty. */
+  /**
+   * Rule that converts a {@link Correlate} to empty if its right child is empty.
+   *
+   * <p>Examples:
+   * <ul>
+   * <li>Correlate(Scan(Emp), Empty, INNER) becomes Empty</li>
+   * <li>Correlate(Scan(Emp), Empty, SEMI) becomes Empty</li>
+   * <li>Correlate(Scan(Emp), Empty, ANTI) becomes Scan(Emp)</li>
+   * <li>Correlate(Scan(Emp), Empty, LEFT) becomes Project(Scan(Emp)) where the Project adds
+   * additional typed null columns to match the join type output.</li>
+   * </ul>
+   */
+  public static final RelOptRule CORRELATE_RIGHT_INSTANCE =
+      CorrelateRightEmptyRuleConfig.DEFAULT.toRule();
+
+  /**
+   * Rule that converts a {@link Correlate} to empty if its left child is empty.
+   */
+  public static final RelOptRule CORRELATE_LEFT_INSTANCE =
+      CorrelateLeftEmptyRuleConfig.DEFAULT.toRule();
+
+  /**
+   * Rule that converts a relation into empty.
+   *
+   * <p>The users can control the application of the rule by:
+   *
+   * <ul>
+   * <li>calling the appropriate constructor and passing the necessary
+   * configuration;
+   *
+   * <li>extending the class through inheritance and overriding
+   * {@link RemoveEmptySingleRule#matches(RelOptRuleCall)}).
+   * </ul>
+   *
+   * <p>When using the deprecated constructors it is only possible to convert
+   * relations which strictly have a single input ({@link SingleRel}). */
   public static class RemoveEmptySingleRule extends PruneEmptyRule {
     /** Creates a RemoveEmptySingleRule. */
-    RemoveEmptySingleRule(RemoveEmptySingleRuleConfig config) {
+    RemoveEmptySingleRule(PruneEmptyRule.Config config) {
       super(config);
     }
 
@@ -296,7 +333,7 @@ public abstract class PruneEmptyRules {
     }
 
     @Override public void onMatch(RelOptRuleCall call) {
-      SingleRel singleRel = call.rel(0);
+      RelNode singleRel = call.rel(0);
       RelNode emptyValues = call.builder().push(singleRel).empty().build();
       RelTraitSet traits = singleRel.getTraitSet();
       // propagate all traits (except convention) from the original singleRel into the empty values
@@ -451,21 +488,12 @@ public abstract class PruneEmptyRules {
         .withDescription("PruneSortLimit0");
 
     @Override default PruneEmptyRule toRule() {
-      return new PruneEmptyRule(this) {
-        @Override public void onMatch(RelOptRuleCall call) {
+      return new RemoveEmptySingleRule(this) {
+        @Override public boolean matches(final RelOptRuleCall call) {
           Sort sort = call.rel(0);
-          if (sort.fetch != null
+          return sort.fetch != null
               && !(sort.fetch instanceof RexDynamicParam)
-              && RexLiteral.intValue(sort.fetch) == 0) {
-            RelNode emptyValues = call.builder().push(sort).empty().build();
-            RelTraitSet traits = sort.getTraitSet();
-            // propagate all traits (except convention) from the original sort into the empty values
-            if (emptyValues.getConvention() != null) {
-              traits = traits.replace(emptyValues.getConvention());
-            }
-            emptyValues = emptyValues.copy(traits, Collections.emptyList());
-            call.transformTo(emptyValues);
-          }
+              && RexLiteral.intValue(sort.fetch) == 0;
         }
 
       };
@@ -487,21 +515,13 @@ public abstract class PruneEmptyRules {
       return new PruneEmptyRule(this) {
         @Override public void onMatch(RelOptRuleCall call) {
           final Join join = call.rel(0);
-          final Values empty = call.rel(1);
           final RelNode right = call.rel(2);
           final RelBuilder relBuilder = call.builder();
           if (join.getJoinType().generatesNullsOnLeft()) {
             // If "emp" is empty, "select * from emp right join dept" will have
             // the same number of rows as "dept", and null values for the
             // columns from "emp". The left side of the join can be removed.
-            final List<RexLiteral> nullLiterals =
-                Collections.nCopies(empty.getRowType().getFieldCount(),
-                    relBuilder.literal(null));
-            call.transformTo(
-                relBuilder.push(right)
-                    .project(concat(nullLiterals, relBuilder.fields()))
-                    .convert(join.getRowType(), true)
-                    .build());
+            call.transformTo(padWithNulls(relBuilder, right, join.getRowType(), true));
             return;
           }
           call.transformTo(relBuilder.push(join).empty().build());
@@ -526,20 +546,12 @@ public abstract class PruneEmptyRules {
         @Override public void onMatch(RelOptRuleCall call) {
           final Join join = call.rel(0);
           final RelNode left = call.rel(1);
-          final Values empty = call.rel(2);
           final RelBuilder relBuilder = call.builder();
           if (join.getJoinType().generatesNullsOnRight()) {
             // If "dept" is empty, "select * from emp left join dept" will have
             // the same number of rows as "emp", and null values for the
             // columns from "dept". The right side of the join can be removed.
-            final List<RexLiteral> nullLiterals =
-                Collections.nCopies(empty.getRowType().getFieldCount(),
-                    relBuilder.literal(null));
-            call.transformTo(
-                relBuilder.push(left)
-                    .project(concat(relBuilder.fields(), nullLiterals))
-                    .convert(join.getRowType(), true)
-                    .build());
+            call.transformTo(padWithNulls(relBuilder, left, join.getRowType(), false));
             return;
           }
           if (join.getJoinType() == JoinRelType.ANTI) {
@@ -553,10 +565,76 @@ public abstract class PruneEmptyRules {
     }
   }
 
-  /** Configuration for rule that transforms an empty relational expression into an empty values.
+  private static RelNode padWithNulls(RelBuilder builder, RelNode input, RelDataType resultType,
+      boolean leftPadding) {
+    int padding = resultType.getFieldCount() - input.getRowType().getFieldCount();
+    List<RexLiteral> nullLiterals = Collections.nCopies(padding, builder.literal(null));
+    builder.push(input);
+    if (leftPadding) {
+      builder.project(concat(nullLiterals, builder.fields()));
+    } else {
+      builder.project(concat(builder.fields(), nullLiterals));
+    }
+    return builder.convert(resultType, true).build();
+  }
+
+  /** Configuration for rule that prunes a correlate if its left input is empty. */
+  @Value.Immutable
+  public interface CorrelateLeftEmptyRuleConfig extends PruneEmptyRule.Config {
+    CorrelateLeftEmptyRuleConfig DEFAULT = ImmutableCorrelateLeftEmptyRuleConfig.of()
+        .withOperandSupplier(b0 ->
+            b0.operand(Correlate.class).inputs(
+                b1 -> b1.operand(Values.class).predicate(Values::isEmpty).noInputs(),
+                b2 -> b2.operand(RelNode.class).anyInputs()))
+        .withDescription("PruneEmptyCorrelate(left)");
+    @Override default PruneEmptyRule toRule() {
+      return new RemoveEmptySingleRule(this);
+    }
+  }
+
+  /** Configuration for rule that prunes a correlate if its right input is empty. */
+  @Value.Immutable
+  public interface CorrelateRightEmptyRuleConfig extends PruneEmptyRule.Config {
+    CorrelateRightEmptyRuleConfig DEFAULT = ImmutableCorrelateRightEmptyRuleConfig.of()
+        .withOperandSupplier(b0 ->
+            b0.operand(Correlate.class).inputs(
+                b1 -> b1.operand(RelNode.class).anyInputs(),
+                b2 -> b2.operand(Values.class).predicate(Values::isEmpty).noInputs()))
+        .withDescription("PruneEmptyCorrelate(right)");
+
+    @Override default PruneEmptyRule toRule() {
+      return new PruneEmptyRule(this) {
+        @Override public void onMatch(RelOptRuleCall call) {
+          final Correlate corr = call.rel(0);
+          final RelNode left = call.rel(1);
+          RelBuilder b = call.builder();
+          final RelNode newRel;
+          switch (corr.getJoinType()) {
+          case LEFT:
+            newRel = padWithNulls(b, left, corr.getRowType(), false);
+            break;
+          case INNER:
+          case SEMI:
+            newRel = b.push(corr).empty().build();
+            break;
+          case ANTI:
+            newRel = left;
+            break;
+          default:
+            throw new IllegalStateException("Correlate does not support " + corr.getJoinType());
+          }
+          call.transformTo(newRel);
+        }
+      };
+    }
+  }
+
+  /** Configuration for rule that transforms an empty relational expression into
+   * an empty values.
    *
-   * It relies on {@link org.apache.calcite.rel.metadata.RelMdMaxRowCount} to derive if the relation
-   * is empty or not. If the stats are not available then the rule is a noop. */
+   * <p>It relies on {@link org.apache.calcite.rel.metadata.RelMdMaxRowCount} to
+   * derive if the relation is empty or not. If the stats are not available then
+   * the rule is a noop. */
   @Value.Immutable
   public interface ZeroMaxRowsRuleConfig extends PruneEmptyRule.Config {
     ZeroMaxRowsRuleConfig DEFAULT = ImmutableZeroMaxRowsRuleConfig.of()
@@ -564,24 +642,11 @@ public abstract class PruneEmptyRules {
         .withDescription("PruneZeroRowsTable");
 
     @Override default PruneEmptyRule toRule() {
-      return new PruneEmptyRule(this) {
+      return new RemoveEmptySingleRule(this) {
         @Override public boolean matches(RelOptRuleCall call) {
           RelNode node = call.rel(0);
           Double maxRowCount = call.getMetadataQuery().getMaxRowCount(node);
           return maxRowCount != null && maxRowCount == 0.0;
-        }
-
-        @Override public void onMatch(RelOptRuleCall call) {
-          RelNode node = call.rel(0);
-          RelNode emptyValues = call.builder().push(node).empty().build();
-          RelTraitSet traits = node.getTraitSet();
-          // propagate all traits (except convention) from the original tableScan
-          // into the empty values
-          if (emptyValues.getConvention() != null) {
-            traits = traits.replace(emptyValues.getConvention());
-          }
-          emptyValues = emptyValues.copy(traits, Collections.emptyList());
-          call.transformTo(emptyValues);
         }
       };
     }

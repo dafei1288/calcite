@@ -22,15 +22,20 @@ import com.google.common.collect.ImmutableSortedSet;
 
 import org.junit.jupiter.api.Assertions;
 
+import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.InvocationTargetException;
+import java.net.URL;
 import java.util.List;
-import java.util.Objects;
 import java.util.SortedSet;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static org.junit.jupiter.api.Assertions.fail;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * Static utilities for JUnit tests.
@@ -87,13 +92,16 @@ public abstract class TestUtil {
    * literal.
    *
    * <p>For example,
-   * <pre><code>string with "quotes" split
-   * across lines</code></pre>
+   *
+   * <blockquote><pre>{@code
+   * string with "quotes" split
+   * across lines}</pre></blockquote>
    *
    * <p>becomes
    *
-   * <blockquote><pre><code>"string with \"quotes\" split" + NL +
-   *  "across lines"</code></pre></blockquote>
+   * <blockquote><pre>{@code
+   * "string with \"quotes\" split" + "\n"
+   *   + "across lines"}</pre></blockquote>
    */
   public static String quoteForJava(String s) {
     s = Util.replace(s, "\\", "\\\\");
@@ -112,16 +120,17 @@ public abstract class TestUtil {
    * Converts a string (which may contain quotes and newlines) into a java
    * literal.
    *
-   * <p>For example,</p>
+   * <p>For example,
    *
-   * <blockquote><pre><code>string with "quotes" split
-   * across lines</code></pre></blockquote>
+   * <blockquote><pre>{code
+   * string with "quotes" split
+   * across lines}</pre></blockquote>
    *
-   * <p>becomes</p>
+   * <p>becomes
    *
-   * <blockquote><pre><code>TestUtil.fold(
-   *  "string with \"quotes\" split\n",
-   *  + "across lines")</code></pre></blockquote>
+   * <blockquote><pre>{@code
+   * TestUtil.fold("string with \"quotes\" split\n",
+   *     + "across lines")}</pre></blockquote>
    */
   public static String toJavaString(String s) {
     // Convert [string with "quotes" split
@@ -248,69 +257,6 @@ public abstract class TestUtil {
     return s;
   }
 
-  /** Rounds all decimal fractions inside a string to a given number of decimal
-   * places.
-   *
-   * <p>For example,
-   * {@code round("POINT(-1.23456, 9.87654)", 3)}
-   * returns "POINT(-1.235, 9.877)". */
-  public static String roundGeom(String s, int precision) {
-    final StringBuilder b = new StringBuilder();
-    boolean carried = false;
-    int end = -1;
-    for (int i = 0; i < s.length(); i++) {
-      char c = s.charAt(i);
-      switch (c) {
-      case '.':
-        // Entering the fractional part of a number
-        end = i + precision + 1;
-        carried = false;
-        break;
-      case '0': case '1': case '2': case '3': case '4':
-      case '5': case '6': case '7': case '8': case '9':
-        if (end < 0) {
-          break; // We've not seen a '.'
-        }
-        if (i < end) {
-          break; // Have seen a '.' but not enough digits yet
-        }
-        if (c > '5' || i > end && c > '0') {
-          if (!carried) {
-            carry(b);
-            carried = true;
-          }
-        }
-        continue;
-      default:
-        end = -1; // no longer in a number
-      }
-      b.append(c);
-    }
-    return b.toString();
-  }
-
-  /** Increments the last digit of a decimal number in a StringBuilder, and if
-   * that digit was a '9', carries on going. */
-  private static void carry(StringBuilder b) {
-    for (int i = b.length() - 1; i >= 0; i--) {
-      char c = b.charAt(i);
-      switch (c) {
-      case '.':
-        continue; // continue to the left of decimal point
-      case '0': case '1': case '2': case '3': case '4':
-      case '5': case '6': case '7': case '8':
-        b.setCharAt(i, (char) (c + 1)); // carry, and we're done
-        return;
-      case '9':
-        b.setCharAt(i, '0'); // '9' becomes '0', and continue carrying
-        continue;
-      default:
-        b.insert(i + 1, '1');
-        return;
-      }
-    }
-  }
-
   /**
    * Returns the Java major version: 7 for JDK 1.7, 8 for JDK 8, 10 for
    * JDK 10, etc. depending on current system property {@code java.version}.
@@ -328,7 +274,7 @@ public abstract class TestUtil {
    */
   @VisibleForTesting
   static int majorVersionFromString(String version) {
-    Objects.requireNonNull(version, "version");
+    requireNonNull(version, "version");
 
     if (version.startsWith("1.")) {
       // running on version <= 8 (expecting string of type: x.y.z*)
@@ -367,6 +313,38 @@ public abstract class TestUtil {
   /** Returns the JVM vendor. */
   public static String getJavaVirtualMachineVendor() {
     return System.getProperty("java.vm.vendor");
+  }
+
+  /** Returns the root directory of the source tree. */
+  public static File getBaseDir(Class<?> klass) {
+    // Algorithm:
+    // 1) Find location of TestUtil.class
+    // 2) Climb via getParentFile() until we detect pom.xml
+    // 3) It means we've got BASE/testkit/pom.xml, and we need to get BASE
+    final URL resource = klass.getResource(klass.getSimpleName() + ".class");
+    final File classFile =
+        Sources.of(requireNonNull(resource, "resource")).file();
+
+    File file = classFile.getAbsoluteFile();
+    for (int i = 0; i < 42; i++) {
+      if (isProjectDir(file)) {
+        // Ok, file == BASE/testkit/
+        break;
+      }
+      file = file.getParentFile();
+    }
+    if (!isProjectDir(file)) {
+      fail("Could not find pom.xml, build.gradle.kts or gradle.properties. "
+          + "Started with " + classFile.getAbsolutePath()
+          + ", the current path is " + file.getAbsolutePath());
+    }
+    return file.getParentFile();
+  }
+
+  private static boolean isProjectDir(File dir) {
+    return new File(dir, "pom.xml").isFile()
+        || new File(dir, "build.gradle.kts").isFile()
+        || new File(dir, "gradle.properties").isFile();
   }
 
   /** Given a list, returns the number of elements that are not between an

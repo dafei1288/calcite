@@ -18,6 +18,7 @@ package org.apache.calcite.adapter.elasticsearch;
 
 import org.apache.calcite.jdbc.CalciteConnection;
 import org.apache.calcite.rel.RelFieldCollation;
+import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.impl.ViewTable;
 import org.apache.calcite.test.CalciteAssert;
@@ -45,10 +46,13 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import static java.util.Objects.requireNonNull;
 
@@ -63,18 +67,21 @@ class ElasticSearchAdapterTest {
 
   /** Default index/type name. */
   private static final String ZIPS = "zips";
+  private static final String ZIPS_ALIAS = "zips_alias";
   private static final int ZIPS_SIZE = 149;
 
   /**
    * Used to create {@code zips} index and insert zip data in bulk.
+   *
    * @throws Exception when instance setup failed
    */
   @BeforeAll
   public static void setupInstance() throws Exception {
-    final Map<String, String> mapping = ImmutableMap.of("city", "keyword", "state",
-        "keyword", "pop", "long");
+    final Map<String, String> mapping =
+        ImmutableMap.of("city", "keyword", "state", "keyword", "pop", "long");
 
     NODE.createIndex(ZIPS, mapping);
+    NODE.createAlias(ZIPS, ZIPS_ALIAS);
 
     // load records from file
     final List<ObjectNode> bulk = new ArrayList<>();
@@ -105,7 +112,7 @@ class ElasticSearchAdapterTest {
         connection.unwrap(CalciteConnection.class).getRootSchema();
 
     root.add("elastic",
-        new ElasticsearchSchema(NODE.restClient(), NODE.mapper(), ZIPS));
+        new ElasticsearchSchema(NODE.restClient(), NODE.mapper(), null));
 
     // add calcite view programmatically
     final String viewSql = "select cast(_MAP['city'] AS varchar(20)) AS \"city\", "
@@ -150,6 +157,31 @@ class ElasticSearchAdapterTest {
         .returnsCount(0);
   }
 
+  @Test void testDisableSSL() throws SQLException {
+    Connection connection =
+        DriverManager.getConnection("jdbc:calcite:lex=JAVA");
+    final SchemaPlus root =
+        connection.unwrap(CalciteConnection.class).getRootSchema();
+
+    final CalciteConnection calciteConnection =
+        connection.unwrap(CalciteConnection.class);
+
+    final ElasticsearchSchemaFactory esSchemaFactory = new ElasticsearchSchemaFactory();
+    Map<String, Object> options = new HashMap<>();
+    String hosts = "[\"" + NODE.restClient().getNodes()
+        .get(0).getHost().toString() + "\"]";
+    options.put("username", "user1");
+    options.put("password", "password");
+    options.put("pathPrefix", "");
+    options.put("disableSSLVerification", "true");
+    options.put("hosts", hosts);
+
+    final Schema esSchmea =
+        esSchemaFactory.create(calciteConnection.getRootSchema(), "es_no_ssl", options);
+
+    assertNotNull(esSchmea);
+  }
+
   @Test void basic() {
     CalciteAssert.that()
         .with(ElasticSearchAdapterTest::createConnection)
@@ -187,6 +219,12 @@ class ElasticSearchAdapterTest {
         .with(ElasticSearchAdapterTest::createConnection)
         .query("select * from elastic.zips limit 0")
         .returnsCount(0);
+  }
+
+  @Test void testAlias() {
+    calciteAssert()
+        .query("select * from elastic.zips_alias")
+        .returnsCount(ZIPS_SIZE);
   }
 
   @Test void testSort() {
@@ -251,11 +289,10 @@ class ElasticSearchAdapterTest {
           //noinspection unchecked
           final int cmp = current.compareTo(next);
           if (direction == RelFieldCollation.Direction.ASCENDING ? cmp > 0 : cmp < 0) {
-            final String message = String.format(Locale.ROOT,
-                "Column %s NOT sorted (%s): %s (index:%d) > %s (index:%d) count: %d",
-                column,
-                direction,
-                current, i, next, i + 1, states.size());
+            final String message =
+                String.format(Locale.ROOT,
+                    "Column %s NOT sorted (%s): %s (index:%d) > %s (index:%d) count: %d",
+                    column, direction, current, i, next, i + 1, states.size());
             throw new AssertionError(message);
           }
         }

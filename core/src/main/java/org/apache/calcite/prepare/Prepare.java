@@ -173,8 +173,9 @@ public abstract class Prepare {
     final RelTraitSet desiredTraits = getDesiredRootTraitSet(root);
 
     final Program program = getProgram();
-    final RelNode rootRel4 = program.run(
-        planner, root.rel, desiredTraits, materializationList, latticeList);
+    final RelNode rootRel4 =
+        program.run(planner, root.rel, desiredTraits, materializationList,
+            latticeList);
     if (LOGGER.isDebugEnabled()) {
       LOGGER.debug("Plan after physical tweaks:\n{}",
           RelOptUtil.toString(rootRel4, SqlExplainLevel.ALL_ATTRIBUTES));
@@ -235,7 +236,7 @@ public abstract class Prepare {
     final SqlToRelConverter.Config config =
         SqlToRelConverter.config()
             .withTrimUnusedFields(true)
-            .withExpand(castNonNull(THREAD_EXPAND.get()))
+            .withExpand(THREAD_EXPAND.get())
             .withInSubQueryThreshold(castNonNull(THREAD_INSUBQUERY_THRESHOLD.get()))
             .withExplain(sqlQuery.getKind() == SqlKind.EXPLAIN);
     final Holder<SqlToRelConverter.Config> configHolder = Holder.of(config);
@@ -374,7 +375,7 @@ public abstract class Prepare {
   protected RelRoot trimUnusedFields(RelRoot root) {
     final SqlToRelConverter.Config config = SqlToRelConverter.config()
         .withTrimUnusedFields(shouldTrim(root.rel))
-        .withExpand(castNonNull(THREAD_EXPAND.get()))
+        .withExpand(THREAD_EXPAND.get())
         .withInSubQueryThreshold(castNonNull(THREAD_INSUBQUERY_THRESHOLD.get()));
     final SqlToRelConverter converter =
         getSqlToRelConverter(getSqlValidator(), catalogReader, config);

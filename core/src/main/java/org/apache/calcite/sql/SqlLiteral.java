@@ -61,11 +61,11 @@ import static java.util.Objects.requireNonNull;
  * object, but the type of that value is implementation detail, and it is best
  * that your code does not depend upon that knowledge. It is better to use
  * task-oriented methods such as {@link #toSqlString(SqlDialect)} and
- * {@link #toValue}.</p>
+ * {@link #toValue}.
  *
  * <p>If you really need to access the value directly, you should switch on the
  * value of the {@link #typeName} field, rather than making assumptions about
- * the runtime type of the {@link #value}.</p>
+ * the runtime type of the {@link #value}.
  *
  * <p>The allowable types and combinations are:
  *
@@ -527,6 +527,7 @@ public class SqlLiteral extends SqlNode {
   /**
    * Converts a chained string literals into regular literals; returns regular
    * literals unchanged.
+   *
    * @throws IllegalArgumentException if {@code node} is not a string literal
    * and cannot be unchained.
    */
@@ -592,7 +593,7 @@ public class SqlLiteral extends SqlNode {
     return litmus.succeed();
   }
 
-  @Override public SqlMonotonicity getMonotonicity(@Nullable SqlValidatorScope scope) {
+  @Override public SqlMonotonicity getMonotonicity(SqlValidatorScope scope) {
     return SqlMonotonicity.CONSTANT;
   }
 
@@ -1086,10 +1087,7 @@ public class SqlLiteral extends SqlNode {
         sb.append(c);
       }
     }
-    ns = new NlsString(
-        sb.toString(),
-        ns.getCharsetName(),
-        ns.getCollation());
+    ns = new NlsString(sb.toString(), ns.getCharsetName(), ns.getCollation());
     return new SqlCharStringLiteral(ns, getParserPosition());
   }
 

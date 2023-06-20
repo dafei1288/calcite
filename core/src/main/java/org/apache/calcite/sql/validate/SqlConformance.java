@@ -348,6 +348,7 @@ public interface SqlConformance {
 
   /**
    * Whether to allow SQL syntax "{@code ROW(expr1, expr2, expr3)}".
+   *
    * <p>The equivalent syntax in standard SQL is
    * "{@code (expr1, expr2, expr3)}".
    *
@@ -563,17 +564,23 @@ public interface SqlConformance {
   SqlLibrary semantics();
 
   /**
-   * Whether to allow coercion string literal to array literal
+   * Whether to allow lenient type coercions.
    *
-   * <p>For example,
+   * <p>Coercions include:
+   * <ul>
    *
-   * <blockquote><pre>SELECT ARRAY[0,1,2] == '{0,1,2}'
-   * </pre></blockquote>
+   * <li>Coercion of string literal to array literal. For example,
+   * {@code SELECT ARRAY[0,1,2] == '{0,1,2}'}
+   *
+   * <li>Casting {@code BOOLEAN} values to one of the following numeric types:
+   * {@code TINYINT}, {@code SMALLINT}, {@code INTEGER}, {@code BIGINT}.
+   *
+   * </ul>
    *
    * <p>Among the built-in conformance levels, true in
    * {@link SqlConformanceEnum#BABEL},
    * false otherwise.
    */
   @Experimental
-  boolean allowCoercionStringToArray();
+  boolean allowLenientCoercion();
 }

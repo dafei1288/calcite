@@ -187,9 +187,10 @@ public class MysqlSqlDialect extends SqlDialect {
   @Override public SqlNode rewriteSingleValueExpr(SqlNode aggCall) {
     final SqlNode operand = ((SqlBasicCall) aggCall).operand(0);
     final SqlLiteral nullLiteral = SqlLiteral.createNull(SqlParserPos.ZERO);
-    final SqlNode unionOperand = new SqlSelect(SqlParserPos.ZERO, SqlNodeList.EMPTY,
-        SqlNodeList.of(nullLiteral), null, null, null, null,
-        SqlNodeList.EMPTY, null, null, null, SqlNodeList.EMPTY);
+    final SqlNode unionOperand =
+        new SqlSelect(SqlParserPos.ZERO, SqlNodeList.EMPTY,
+            SqlNodeList.of(nullLiteral), null, null, null, null,
+            SqlNodeList.EMPTY, null, null, null, null, SqlNodeList.EMPTY);
     // For MySQL, generate
     //   CASE COUNT(*)
     //   WHEN 0 THEN NULL
@@ -217,6 +218,14 @@ public class MysqlSqlDialect extends SqlDialect {
   @Override public void unparseCall(SqlWriter writer, SqlCall call,
       int leftPrec, int rightPrec) {
     switch (call.getKind()) {
+    case POSITION:
+      final SqlWriter.Frame frame = writer.startFunCall("INSTR");
+      writer.sep(",");
+      call.operand(1).unparse(writer, leftPrec, rightPrec);
+      writer.sep(",");
+      call.operand(0).unparse(writer, leftPrec, rightPrec);
+      writer.endFunCall(frame);
+      break;
     case FLOOR:
       if (call.operandCount() != 2) {
         super.unparseCall(writer, call, leftPrec, rightPrec);

@@ -28,6 +28,9 @@ import org.hamcrest.Matcher;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Types;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -55,6 +58,18 @@ public class ResultCheckers {
   public static SqlTester.ResultChecker isExactly(String value) {
     return new MatcherResultChecker<>(is(new BigDecimal(value)),
         JdbcType.BIG_DECIMAL);
+  }
+
+  public static SqlTester.ResultChecker isExactDateTime(LocalDateTime dateTime) {
+    return new MatcherResultChecker<>(
+        is(BigDecimal.valueOf(dateTime.toInstant(ZoneOffset.UTC).toEpochMilli())),
+        JdbcType.BIG_DECIMAL);
+  }
+
+  public static SqlTester.ResultChecker isExactTime(LocalTime time) {
+    return new MatcherResultChecker<>(
+        is((int) (time.toNanoOfDay() / 1000_000)),
+        JdbcType.INTEGER);
   }
 
   public static SqlTester.ResultChecker isWithin(double value, double delta) {
@@ -99,15 +114,17 @@ public class ResultCheckers {
    * Compares the first column of a result set against a String-valued
    * reference set, disregarding order entirely.
    *
+   * @param sql       SQL to show in case of failure
    * @param resultSet Result set
    * @param refSet    Expected results
    * @throws Exception .
    */
-  static void compareResultSet(ResultSet resultSet,
+  static void compareResultSet(String sql, ResultSet resultSet,
       Set<String> refSet) throws Exception {
     Set<String> actualSet = new HashSet<>();
     final int columnType = resultSet.getMetaData().getColumnType(1);
     final ColumnMetaData.Rep rep = rep(columnType);
+    final String msg = "Query: " + sql;
     while (resultSet.next()) {
       final String s = resultSet.getString(1);
       final String s0 = s == null ? "0" : s;
@@ -116,7 +133,7 @@ public class ResultCheckers {
       switch (rep) {
       case BOOLEAN:
       case PRIMITIVE_BOOLEAN:
-        assertThat(resultSet.getBoolean(1), equalTo(Boolean.valueOf(s)));
+        assertThat(msg, resultSet.getBoolean(1), equalTo(Boolean.valueOf(s)));
         break;
       case BYTE:
       case PRIMITIVE_BYTE:
@@ -133,18 +150,18 @@ public class ResultCheckers {
           // Large integers come out in scientific format, say "5E+06"
           l = (long) Double.parseDouble(s0);
         }
-        assertThat(resultSet.getByte(1), equalTo((byte) l));
-        assertThat(resultSet.getShort(1), equalTo((short) l));
-        assertThat(resultSet.getInt(1), equalTo((int) l));
-        assertThat(resultSet.getLong(1), equalTo(l));
+        assertThat(msg, resultSet.getByte(1), equalTo((byte) l));
+        assertThat(msg, resultSet.getShort(1), equalTo((short) l));
+        assertThat(msg, resultSet.getInt(1), equalTo((int) l));
+        assertThat(msg, resultSet.getLong(1), equalTo(l));
         break;
       case FLOAT:
       case PRIMITIVE_FLOAT:
       case DOUBLE:
       case PRIMITIVE_DOUBLE:
         final double d = Double.parseDouble(s0);
-        assertThat(resultSet.getFloat(1), equalTo((float) d));
-        assertThat(resultSet.getDouble(1), equalTo(d));
+        assertThat(msg, resultSet.getFloat(1), equalTo((float) d));
+        assertThat(msg, resultSet.getDouble(1), equalTo(d));
         break;
       default:
         // fall through; no type-specific validation is necessary
@@ -152,12 +169,12 @@ public class ResultCheckers {
       final boolean wasNull1 = resultSet.wasNull();
       final Object object = resultSet.getObject(1);
       final boolean wasNull2 = resultSet.wasNull();
-      assertThat(object == null, equalTo(wasNull0));
-      assertThat(wasNull1, equalTo(wasNull0));
-      assertThat(wasNull2, equalTo(wasNull0));
+      assertThat(msg, object == null, equalTo(wasNull0));
+      assertThat(msg, wasNull1, equalTo(wasNull0));
+      assertThat(msg, wasNull2, equalTo(wasNull0));
     }
     resultSet.close();
-    assertEquals(refSet, actualSet);
+    assertEquals(refSet, actualSet, msg);
   }
 
   private static ColumnMetaData.Rep rep(int columnType) {
@@ -191,20 +208,21 @@ public class ResultCheckers {
    * Compares the first column of a result set against a pattern. The result
    * set must return exactly one row.
    *
+   * @param sql       SQL to show in case of failure
    * @param resultSet Result set
    * @param pattern   Expected pattern
    */
-  static void compareResultSetWithPattern(ResultSet resultSet,
+  static void compareResultSetWithPattern(String sql, ResultSet resultSet,
       Pattern pattern) throws Exception {
     if (!resultSet.next()) {
-      fail("Query returned 0 rows, expected 1");
+      fail("Query \"" + sql + "\"returned 0 rows, expected 1");
     }
     String actual = resultSet.getString(1);
     if (resultSet.next()) {
-      fail("Query returned 2 or more rows, expected 1");
+      fail("Query \"" + sql + "\"returned 2 or more rows, expected 1");
     }
     if (!pattern.matcher(actual).matches()) {
-      fail("Query returned '"
+      fail("Query \"" + sql + "\"returned '"
               + actual
               + "', expected '"
               + pattern.pattern()
@@ -216,12 +234,13 @@ public class ResultCheckers {
    * Compares the first column of a result set against a {@link Matcher}.
    * The result set must return exactly one row.
    *
+   * @param sql       SQL to show in case of failure
    * @param resultSet Result set
    * @param matcher   Matcher
    *
    * @param <T> Value type
    */
-  static <T> void compareResultSetWithMatcher(ResultSet resultSet,
+  static <T> void compareResultSetWithMatcher(String sql, ResultSet resultSet,
       JdbcType<T> jdbcType, Matcher<T> matcher) throws Exception {
     if (!resultSet.next()) {
       fail("Query returned 0 rows, expected 1");
@@ -230,7 +249,7 @@ public class ResultCheckers {
     if (resultSet.next()) {
       fail("Query returned 2 or more rows, expected 1");
     }
-    assertThat(actual, matcher);
+    assertThat("Query: " + sql, actual, matcher);
   }
 
   /** Creates a ResultChecker that accesses a column of a given type
@@ -279,8 +298,8 @@ public class ResultCheckers {
       this.pattern = requireNonNull(pattern, "pattern");
     }
 
-    @Override public void checkResult(ResultSet resultSet) throws Exception {
-      compareResultSetWithPattern(resultSet, pattern);
+    @Override public void checkResult(String sql, ResultSet resultSet) throws Exception {
+      compareResultSetWithPattern(sql, resultSet, pattern);
     }
   }
 
@@ -298,8 +317,8 @@ public class ResultCheckers {
       this.jdbcType = requireNonNull(jdbcType, "jdbcType");
     }
 
-    @Override public void checkResult(ResultSet resultSet) throws Exception {
-      compareResultSetWithMatcher(resultSet, jdbcType, matcher);
+    @Override public void checkResult(String sql, ResultSet resultSet) throws Exception {
+      compareResultSetWithMatcher(sql, resultSet, jdbcType, matcher);
     }
   }
 
@@ -313,8 +332,8 @@ public class ResultCheckers {
       this.expected = ImmutableNullableSet.copyOf(expected);
     }
 
-    @Override public void checkResult(ResultSet resultSet) throws Exception {
-      compareResultSet(resultSet, expected);
+    @Override public void checkResult(String sql, ResultSet resultSet) throws Exception {
+      compareResultSet(sql, resultSet, expected);
     }
   }
 }

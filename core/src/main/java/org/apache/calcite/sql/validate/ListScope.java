@@ -83,13 +83,15 @@ public abstract class ListScope extends DelegatingScope {
   /**
    * Whether the ith child namespace produces nullable result.
    *
-   * For example, in below query,
-   * <pre>
+   * <p>For example, in below query,
+   *
+   * <blockquote><pre>{@code
    *   SELECT *
    *   FROM EMPS
    *   LEFT OUTER JOIN DEPT
-   * </pre>
-   * the namespace which corresponding to 'DEPT' is nullable.
+   * }</pre></blockquote>
+   *
+   * <p>the namespace which corresponding to 'DEPT' is nullable.
    *
    * @param i The child index.
    * @return Whether it's nullable.
@@ -200,7 +202,8 @@ public abstract class ListScope extends DelegatingScope {
       final Step path =
           Path.EMPTY.plus(child0.namespace.getRowType(), child0.ordinal,
               child0.name, StructKind.FULLY_QUALIFIED);
-      resolved.found(child0.namespace, child0.nullable, this, path, null);
+      resolved.found(child0.namespace, child0.nullable, this, path,
+          ImmutableList.of());
       return;
     }
 

@@ -91,8 +91,9 @@ public class EnumerableMergeUnionRule extends RelRule<EnumerableMergeUnionRule.C
       if (sort.offset == null) {
         inputFetch = sort.fetch;
       } else if (sort.fetch instanceof RexLiteral && sort.offset instanceof RexLiteral) {
-        inputFetch = call.builder().literal(
-            RexLiteral.intValue(sort.fetch) + RexLiteral.intValue(sort.offset));
+        inputFetch =
+            call.builder().literal(RexLiteral.intValue(sort.fetch)
+                + RexLiteral.intValue(sort.offset));
       }
     }
 
@@ -134,7 +135,8 @@ public class EnumerableMergeUnionRule extends RelRule<EnumerableMergeUnionRule.C
       final RelNode newInput =
           sort.copy(sort.getTraitSet(), unsortedInput, collation, null, inputFetch);
       inputs.add(
-          convert(newInput, newInput.getTraitSet().replace(EnumerableConvention.INSTANCE)));
+          convert(call.getPlanner(), newInput,
+              newInput.getTraitSet().replace(EnumerableConvention.INSTANCE)));
     }
 
     RelNode result = EnumerableMergeUnion.create(sort.getCollation(), inputs, union.all);

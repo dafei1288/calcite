@@ -54,14 +54,16 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
+
+import static org.apache.calcite.util.Util.transform;
 
 /**
  * This is a tool to visualize the rule match process of a RelOptPlanner.
  *
- * <pre>{@code
+ * <blockquote><pre>{@code
  * // create the visualizer
- * RuleMatchVisualizer viz = new RuleMatchVisualizer("/path/to/output/dir", "file-name-suffix");
+ * RuleMatchVisualizer viz =
+ *     new RuleMatchVisualizer("/path/to/output/dir", "file-name-suffix");
  * viz.attachTo(planner)
  *
  * planner.findBestExpr();
@@ -69,7 +71,7 @@ import java.util.stream.Collectors;
  * // extra step for HepPlanner: write the output to files
  * // a VolcanoPlanner will call it automatically
  * viz.writeToFile();
- * }</pre>
+ * }</pre></blockquote>
  */
 public class RuleMatchVisualizer implements RelOptListener {
 
@@ -159,8 +161,7 @@ public class RuleMatchVisualizer implements RelOptListener {
    */
   private void updateInitialPlan(RelNode node) {
     if (node instanceof HepRelVertex) {
-      HepRelVertex v = (HepRelVertex) node;
-      updateInitialPlan(v.getCurrentRel());
+      updateInitialPlan(node.stripped());
       return;
     }
     this.registerRelNode(node);
@@ -174,12 +175,8 @@ public class RuleMatchVisualizer implements RelOptListener {
    * (Workaround for HepPlanner)
    */
   private static List<RelNode> getInputs(final RelNode node) {
-    return node.getInputs().stream().map(n -> {
-      if (n instanceof HepRelVertex) {
-        return ((HepRelVertex) n).getCurrentRel();
-      }
-      return n;
-    }).collect(Collectors.toList());
+    return transform(node.getInputs(), n ->
+        n instanceof HepRelVertex ? n.stripped() : n);
   }
 
   @Override public void relChosen(RelChosenEvent event) {
@@ -377,8 +374,8 @@ public class RuleMatchVisualizer implements RelOptListener {
 
   /**
    * Writes the HTML and JS files of the rule match visualization.
-   * <p>
-   * The old files with the same name will be replaced.
+   *
+   * <p>The old files with the same name will be replaced.
    */
   public void writeToFile() {
     if (outputDirectory == null || outputSuffix == null) {

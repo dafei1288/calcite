@@ -41,12 +41,12 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeImpl;
 import org.apache.calcite.rel.type.RelProtoDataType;
+import org.apache.calcite.runtime.AccumOperation;
 import org.apache.calcite.runtime.CalciteException;
+import org.apache.calcite.runtime.CollectOperation;
 import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.runtime.SpatialTypeFunctions;
-import org.apache.calcite.runtime.SpatialTypeFunctions.Accum;
-import org.apache.calcite.runtime.SpatialTypeFunctions.Collect;
-import org.apache.calcite.runtime.SpatialTypeFunctions.Union;
+import org.apache.calcite.runtime.UnionOperation;
 import org.apache.calcite.schema.Schema;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.SchemaVersion;
@@ -157,7 +157,7 @@ public class CalciteAssert {
    * Which database to use for tests that require a JDBC data source.
    *
    * @see CalciteSystemProperty#TEST_DB
-   **/
+   */
   public static final DatabaseInstance DB =
       DatabaseInstance.valueOf(CalciteSystemProperty.TEST_DB.value());
 
@@ -233,7 +233,7 @@ public class CalciteAssert {
   }
 
   /** Short-hand for
-   *  {@code CalciteAssert.that().with(Config.EMPTY).withModel(model)}. */
+   * {@code CalciteAssert.that().with(Config.EMPTY).withModel(model)}. */
   public static AssertThat model(String model) {
     return that().withModel(model);
   }
@@ -406,9 +406,32 @@ public class CalciteAssert {
   /** Checks that the {@link ResultSet} returns the given set of lines,
    * optionally sorting.
    *
+   * <p>The lines must not contain line breaks. If you have written
+   *
+   * <pre>{@code
+   * checkUnordered("line1\n"
+   *     + "line2")
+   * }</pre>
+   *
+   * <p>you should instead write
+   *
+   * <pre>{@code
+   * checkUnordered("line1",
+   *     "line2")
+   * }</pre>
+   *
+   * <p>so that result-checking is order-independent.
+   *
    * @see Matchers#returnsUnordered(String...) */
   static Consumer<ResultSet> checkResult(final boolean sort,
       final boolean head, final String... lines) {
+    // Check that none of the lines contains a line break.
+    for (String line : lines) {
+      if (line.contains("\n")) {
+        throw new AssertionError("expected line has line breaks: " + line);
+      }
+    }
+
     return resultSet -> {
       try {
         final List<String> expectedList = Lists.newArrayList(lines);
@@ -777,8 +800,8 @@ public class CalciteAssert {
           new ReflectiveSchema(new FoodmartSchema()));
     case JDBC_SCOTT:
       cs = DatabaseInstance.HSQLDB.scott;
-      dataSource = JdbcSchema.dataSource(cs.url, cs.driver, cs.username,
-          cs.password);
+      dataSource =
+          JdbcSchema.dataSource(cs.url, cs.driver, cs.username, cs.password);
       return rootSchema.add(schema.schemaName,
           JdbcSchema.create(rootSchema, schema.schemaName, dataSource,
               cs.catalog, cs.schema));
@@ -827,26 +850,26 @@ public class CalciteAssert {
           SpatialTypeFunctions.class.getName(), "*", true);
       ModelHandler.addFunctions(rootSchema, null, emptyPath,
           SqlSpatialTypeFunctions.class.getName(), "*", true);
-      rootSchema.add("ST_UNION", AggregateFunctionImpl.create(Union.class));
-      rootSchema.add("ST_ACCUM", AggregateFunctionImpl.create(Accum.class));
-      rootSchema.add("ST_COLLECT", AggregateFunctionImpl.create(Collect.class));
-      ModelHandler.addFunctions(rootSchema, "roundGeom", emptyPath,
-          TestUtil.class.getName(), "roundGeom", true);
+      rootSchema.add("ST_UNION", AggregateFunctionImpl.create(UnionOperation.class));
+      rootSchema.add("ST_ACCUM", AggregateFunctionImpl.create(AccumOperation.class));
+      rootSchema.add("ST_COLLECT", AggregateFunctionImpl.create(CollectOperation.class));
       final SchemaPlus s =
           rootSchema.add(schema.schemaName, new AbstractSchema());
       ModelHandler.addFunctions(s, "countries", emptyPath,
           CountriesTableFunction.class.getName(), null, false);
       final String sql = "select * from table(\"countries\"(true))";
-      final ViewTableMacro viewMacro = ViewTable.viewMacro(rootSchema, sql,
-          ImmutableList.of("GEO"), emptyPath, false);
+      final ViewTableMacro viewMacro =
+          ViewTable.viewMacro(rootSchema, sql,
+              ImmutableList.of("GEO"), emptyPath, false);
       s.add("countries", viewMacro);
       ModelHandler.addFunctions(s, "states", emptyPath,
           StatesTableFunction.class.getName(), "states", false);
       final String sql2 = "select \"name\",\n"
           + " ST_PolyFromText(\"geom\") as \"geom\"\n"
           + "from table(\"states\"(true))";
-      final ViewTableMacro viewMacro2 = ViewTable.viewMacro(rootSchema, sql2,
-          ImmutableList.of("GEO"), emptyPath, false);
+      final ViewTableMacro viewMacro2 =
+          ViewTable.viewMacro(rootSchema, sql2,
+              ImmutableList.of("GEO"), emptyPath, false);
       s.add("states", viewMacro2);
 
       ModelHandler.addFunctions(s, "parks", emptyPath,
@@ -854,8 +877,9 @@ public class CalciteAssert {
       final String sql3 = "select \"name\",\n"
           + " ST_PolyFromText(\"geom\") as \"geom\"\n"
           + "from table(\"parks\"(true))";
-      final ViewTableMacro viewMacro3 = ViewTable.viewMacro(rootSchema, sql3,
-          ImmutableList.of("GEO"), emptyPath, false);
+      final ViewTableMacro viewMacro3 =
+          ViewTable.viewMacro(rootSchema, sql3,
+              ImmutableList.of("GEO"), emptyPath, false);
       s.add("parks", viewMacro3);
 
       return s;
@@ -1148,7 +1172,7 @@ public class CalciteAssert {
       return with(connectionFactory.with(property, value));
     }
 
-    /** Sets the Lex property. **/
+    /** Sets the Lex property. */
     public AssertThat with(Lex lex) {
       return with(CalciteConnectionProperty.LEX, lex);
     }
@@ -1220,9 +1244,10 @@ public class CalciteAssert {
             + "]"
             + model.substring(endIndex + 1);
       } else if (model.contains("type: ")) {
-        model2 = model.replaceFirst("type: ",
-            java.util.regex.Matcher.quoteReplacement(buf + ",\n"
-            + "type: "));
+        model2 =
+            model.replaceFirst("type: ",
+                java.util.regex.Matcher.quoteReplacement(buf + ",\n"
+                    + "type: "));
       } else {
         throw new AssertionError("do not know where to splice");
       }
@@ -1552,10 +1577,10 @@ public class CalciteAssert {
      *
      * <p>Note: this API does NOT trigger the query, so you need to use something like
      * {@link #returns(String)}, or {@link #returnsUnordered(String...)} to trigger query
-     * execution</p>
+     * execution
      *
      * <p>Note: prefer using {@link #explainHookMatches(String)} if you assert
-     * the full plan tree as it produces slightly cleaner messages</p>
+     * the full plan tree as it produces slightly cleaner messages
      *
      * @param expectedPlan expected execution plan. The plan is normalized to LF line endings
      * @return updated assert query
@@ -1572,10 +1597,10 @@ public class CalciteAssert {
      *
      * <p>Note: this API does NOT trigger the query, so you need to use something like
      * {@link #returns(String)}, or {@link #returnsUnordered(String...)} to trigger query
-     * execution</p>
+     * execution
      *
      * <p>Note: prefer using {@link #explainHookMatches(SqlExplainLevel, Matcher)} if you assert
-     * the full plan tree as it produces slightly cleaner messages</p>
+     * the full plan tree as it produces slightly cleaner messages
      *
      * @param sqlExplainLevel the level of explain plan
      * @param expectedPlan expected execution plan. The plan is normalized to LF line endings
@@ -1593,7 +1618,7 @@ public class CalciteAssert {
      *
      * <p>Note: this API does NOT trigger the query, so you need to use something like
      * {@link #returns(String)}, or {@link #returnsUnordered(String...)} to trigger query
-     * execution</p>
+     * execution.
      *
      * @param expectedPlan expected execution plan. The plan is normalized to LF line endings
      * @return updated assert query
@@ -1610,7 +1635,7 @@ public class CalciteAssert {
      *
      * <p>Note: this API does NOT trigger the query, so you need to use something like
      * {@link #returns(String)}, or {@link #returnsUnordered(String...)} to trigger query
-     * execution</p>
+     * execution.
      *
      * @param planMatcher execution plan matcher. The plan is normalized to LF line endings
      * @return updated assert query
@@ -1627,7 +1652,7 @@ public class CalciteAssert {
      *
      * <p>Note: this API does NOT trigger the query, so you need to use something like
      * {@link #returns(String)}, or {@link #returnsUnordered(String...)} to trigger query
-     * execution</p>
+     * execution.
      *
      * @param sqlExplainLevel the level of explain plan
      * @param planMatcher execution plan matcher. The plan is normalized to LF line endings

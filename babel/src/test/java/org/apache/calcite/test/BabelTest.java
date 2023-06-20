@@ -37,8 +37,8 @@ import java.sql.Types;
 import java.util.Properties;
 import java.util.function.UnaryOperator;
 
+import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.core.Is.is;
 
 /**
  * Unit tests for Babel framework.
@@ -107,6 +107,24 @@ class BabelTest {
       assertThat("Invalid column type", metaData.getColumnType(1),
           is(sqlType));
     }
+  }
+
+  @Test void testPosixRegex() {
+    final SqlValidatorFixture f = Fixtures.forValidator()
+        .withParserConfig(p -> p.withParserFactory(SqlBabelParserImpl.FACTORY));
+    f.withSql("select null !~ 'ab[cd]'").ok();
+    f.withSql("select 'abcd' !~ null").ok();
+    f.withSql("select null !~ null").ok();
+    f.withSql("select null !~* 'ab[cd]'").ok();
+    f.withSql("select 'abcd' !~* null").ok();
+    f.withSql("select null !~* null").ok();
+    f.withSql("select null ~* null").ok();
+    f.withSql("select 'abcd' ~* null").ok();
+    f.withSql("select null ~* 'ab[cd]'").ok();
+    f.withSql("select null ~ null").ok();
+    f.withSql("select 'abcd' ~ null").ok();
+    f.withSql("select null ~ 'ab[cd]'").ok();
+    f.withSql("select 'abcd' !~* 'ab[CD]'").ok();
   }
 
   /** Tests that you can run tests via {@link Fixtures}. */

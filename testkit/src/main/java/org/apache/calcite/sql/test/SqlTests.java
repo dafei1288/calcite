@@ -33,6 +33,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.calcite.sql.test.SqlTester.ParameterChecker;
@@ -41,6 +42,7 @@ import static org.apache.calcite.sql.test.SqlTester.TypeChecker;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasToString;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
@@ -58,7 +60,7 @@ public abstract class SqlTests {
   /**
    * Checker which allows any type.
    */
-  public static final TypeChecker ANY_TYPE_CHECKER = type -> {
+  public static final TypeChecker ANY_TYPE_CHECKER = (sql, type) -> {
   };
 
   /**
@@ -70,7 +72,7 @@ public abstract class SqlTests {
   /**
    * Checker that allows any result.
    */
-  public static final ResultChecker ANY_RESULT_CHECKER = result -> {
+  public static final ResultChecker ANY_RESULT_CHECKER = (sql, result) -> {
     while (true) {
       if (!result.next()) {
         break;
@@ -424,8 +426,8 @@ public abstract class SqlTests {
       this.typeName = typeName;
     }
 
-    @Override public void checkType(RelDataType type) {
-      assertThat(type.toString(), is(typeName.toString()));
+    @Override public void checkType(Supplier<String> sql, RelDataType type) {
+      assertThat(sql.get(), type, hasToString(typeName.toString()));
     }
   }
 
@@ -450,9 +452,9 @@ public abstract class SqlTests {
       this.expected = expected;
     }
 
-    @Override public void checkType(RelDataType type) {
+    @Override public void checkType(Supplier<String> sql, RelDataType type) {
       String actual = getTypeString(type);
-      assertThat(actual, is(expected));
+      assertThat(sql.get(), actual, is(expected));
     }
   }
 

@@ -38,6 +38,8 @@ import org.apache.calcite.sql.type.AbstractSqlType;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
+import org.apache.calcite.util.format.FormatModel;
+import org.apache.calcite.util.format.FormatModels;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Suppliers;
@@ -722,18 +724,18 @@ public class SqlDialect {
   /**
    * Returns whether the dialect supports GROUP BY literals.
    *
-   * <p>For instance, in {@link DatabaseProduct#REDSHIFT}, the following queries are illegal.</p>
-   * <pre>{@code
+   * <p>For instance, in {@link DatabaseProduct#REDSHIFT}, the following queries
+   * are illegal:
+   *
+   * <blockquote><pre>{@code
    * select avg(salary)
    * from emp
    * group by true
-   * }</pre>
    *
-   *  <pre>{@code
    * select avg(salary)
    * from emp
    * group by 'a', DATE '2022-01-01'
-   * }</pre>
+   * }</pre></blockquote>
    */
   public boolean supportsGroupByLiteral() {
     return true;
@@ -849,7 +851,7 @@ public class SqlDialect {
   }
 
   /** Rewrite SINGLE_VALUE into expression based on database variants
-   *  E.g. HSQLDB, MYSQL, ORACLE, etc
+   * E.g. HSQLDB, MYSQL, ORACLE, etc.
    */
   public SqlNode rewriteSingleValueExpr(SqlNode aggCall) {
     LOGGER.debug("SINGLE_VALUE rewrite not supported for {}", databaseProduct);
@@ -1000,6 +1002,18 @@ public class SqlDialect {
       offset.unparse(writer, -1, -1);
       writer.endList(offsetFrame);
     }
+  }
+
+  /**
+   * Returns a description of the format string used by functions in this
+   * dialect.
+   *
+   * <p>Dialects may need to override this element mapping if they differ from
+   * <a href="https://docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/Format-Models.html">
+   * Oracle's format elements</a>. By default, this returns {@link FormatModels#DEFAULT}.
+   */
+  public FormatModel getFormatModel() {
+    return FormatModels.DEFAULT;
   }
 
   /**

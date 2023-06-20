@@ -131,7 +131,7 @@ import static java.util.Objects.requireNonNull;
  * from joining the RelNode that produces the corExp with the RelNode that
  * references it.
  *
- * <p>TODO:</p>
+ * <p>TODO:
  * <ul>
  *   <li>replace {@code CorelMap} constructor parameter with a RelNode
  *   <li>make {@link #currentRel} immutable (would require a fresh
@@ -856,8 +856,9 @@ public class RelDecorrelator implements ReflectiveVisitor {
       assert newInput != null;
 
       if (!joinedInputs.contains(newInput)) {
-        final List<Integer> positions = requireNonNull(mapNewInputToOutputs.get(newInput),
-            () -> "mapNewInputToOutputs.get(" + newInput + ")");
+        final List<Integer> positions =
+            requireNonNull(mapNewInputToOutputs.get(newInput),
+                () -> "mapNewInputToOutputs.get(" + newInput + ")");
 
         RelNode distinct = relBuilder.push(newInput)
             .project(relBuilder.fields(positions))
@@ -891,8 +892,9 @@ public class RelDecorrelator implements ReflectiveVisitor {
       final RelNode newInput = frame.r;
       assert newInput != null;
 
-      final List<Integer> newLocalOutputs = requireNonNull(mapNewInputToOutputs.get(newInput),
-          () -> "mapNewInputToOutputs.get(" + newInput + ")");
+      final List<Integer> newLocalOutputs =
+          requireNonNull(mapNewInputToOutputs.get(newInput),
+              () -> "mapNewInputToOutputs.get(" + newInput + ")");
 
       final int newLocalOutput = requireNonNull(frame.oldToNewOutputs.get(corRef.field));
 
@@ -925,8 +927,9 @@ public class RelDecorrelator implements ReflectiveVisitor {
   }
 
   private RelNode getCorRel(CorRef corVar) {
-    final RelNode r = requireNonNull(cm.mapCorToCorRel.get(corVar.corr),
-        () -> "cm.mapCorToCorRel.get(" + corVar.corr + ")");
+    final RelNode r =
+        requireNonNull(cm.mapCorToCorRel.get(corVar.corr),
+            () -> "cm.mapCorToCorRel.get(" + corVar.corr + ")");
     return requireNonNull(r.getInput(0),
         () -> "r.getInput(0) is null for " + r);
   }
@@ -1024,13 +1027,16 @@ public class RelDecorrelator implements ReflectiveVisitor {
 
     // can directly add positions into corDefOutputs since join
     // does not change the output ordering from the inputs.
-    RelNode valueGen = requireNonNull(
-        createValueGenerator(corVarList, leftInputOutputCount, corDefOutputs),
-        "createValueGenerator(...) is null");
+    final RelNode valueGen =
+        createValueGenerator(corVarList, leftInputOutputCount, corDefOutputs);
+    requireNonNull(valueGen, "valueGen");
 
-    RelNode join = relBuilder.push(frame.r).push(valueGen)
-        .join(JoinRelType.INNER, relBuilder.literal(true),
-        ImmutableSet.of()).build();
+    RelNode join =
+        relBuilder
+            .push(frame.r)
+            .push(valueGen)
+            .join(JoinRelType.INNER)
+            .build();
 
     // Join or Filter does not change the old input ordering. All
     // input fields from newLeftInput (i.e. the original input to the old
@@ -1354,8 +1360,9 @@ public class RelDecorrelator implements ReflectiveVisitor {
         oldInput = oldInput0;
         break;
       }
-      RelNode newInput = requireNonNull(map.get(oldInput0),
-          () -> "map.get(oldInput0) for " + oldInput0).r;
+      RelNode newInput =
+          requireNonNull(map.get(oldInput0),
+              () -> "map.get(oldInput0) for " + oldInput0).r;
       newOrdinal += newInput.getRowType().getFieldCount();
       oldOrdinal -= n;
     }
@@ -1607,11 +1614,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
   }
 
   private static RelNode stripHep(RelNode rel) {
-    if (rel instanceof HepRelVertex) {
-      HepRelVertex hepRelVertex = (HepRelVertex) rel;
-      rel = hepRelVertex.getCurrentRel();
-    }
-    return rel;
+    return rel instanceof HepRelVertex ? rel.stripped() : rel;
   }
 
   //~ Inner Classes ----------------------------------------------------------
@@ -1857,26 +1860,32 @@ public class RelDecorrelator implements ReflectiveVisitor {
   /**
    * Rule to remove an Aggregate with SINGLE_VALUE. For cases like:
    *
+   * <pre>{@code
    * Aggregate(SINGLE_VALUE)
    *   Project(single expression)
    *     Aggregate
+   * }</pre>
    *
-   * For instance (subtree taken from TPCH query 17):
+   * <p>For instance, the following subtree from TPCH query 17:
    *
+   * <pre>{@code
    * LogicalAggregate(group=[{}], agg#0=[SINGLE_VALUE($0)])
    *   LogicalProject(EXPR$0=[*(0.2:DECIMAL(2, 1), $0)])
    *     LogicalAggregate(group=[{}], agg#0=[AVG($0)])
    *       LogicalProject(L_QUANTITY=[$4])
    *         LogicalFilter(condition=[=($1, $cor0.P_PARTKEY)])
    *           LogicalTableScan(table=[[TPCH_01, LINEITEM]])
+   * }</pre>
    *
-   * Will be converted into:
+   * <p>will be converted into:
    *
+   * <pre>{@code
    * LogicalProject($f0=[*(0.2:DECIMAL(2, 1), $0)])
    *   LogicalAggregate(group=[{}], agg#0=[AVG($0)])
    *     LogicalProject(L_QUANTITY=[$4])
    *       LogicalFilter(condition=[=($1, $cor0.P_PARTKEY)])
    *         LogicalTableScan(table=[[TPCH_01, LINEITEM]])
+   * }</pre>
    */
   public static final class RemoveSingleAggregateRule
       extends RelRule<RemoveSingleAggregateRule.RemoveSingleAggregateRuleConfig> {
@@ -1920,13 +1929,9 @@ public class RelDecorrelator implements ReflectiveVisitor {
 
       // ensure we keep the same type after removing the SINGLE_VALUE Aggregate
       final RelBuilder relBuilder = call.builder();
-      final RelDataType singleAggType =
-          singleAggregate.getRowType().getFieldList().get(0).getType();
-      final RexNode oldProjectExp = projExprs.get(0);
-      final RexNode newProjectExp = singleAggType.equals(oldProjectExp.getType())
-              ? oldProjectExp
-              : relBuilder.getRexBuilder().makeCast(singleAggType, oldProjectExp);
-      relBuilder.push(aggregate).project(newProjectExp);
+      relBuilder.push(aggregate)
+          .project(project.getAliasedProjects(relBuilder))
+          .convert(singleAggregate.getRowType(), false);
       call.transformTo(relBuilder.build());
     }
 
@@ -2026,7 +2031,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
         right = filter.getInput();
 
         assert right instanceof HepRelVertex;
-        right = ((HepRelVertex) right).getCurrentRel();
+        right = right.stripped();
 
         // check filter input contains no correlation
         if (RelOptUtil.getVariablesUsed(right).size() > 0) {
@@ -2258,7 +2263,7 @@ public class RelDecorrelator implements ReflectiveVisitor {
         right = filter.getInput();
 
         assert right instanceof HepRelVertex;
-        right = ((HepRelVertex) right).getCurrentRel();
+        right = right.stripped();
 
         // check filter input contains no correlation
         if (RelOptUtil.getVariablesUsed(right).size() > 0) {
@@ -2433,12 +2438,17 @@ public class RelDecorrelator implements ReflectiveVisitor {
       int joinOutputProjExprCount =
           leftInputFieldCount + aggInputProjects.size() + 1;
 
-      right = d.createProjectWithAdditionalExprs(right,
-          ImmutableList.of(
-              Pair.of(rexBuilder.makeLiteral(true), "nullIndicator")));
+      right =
+          d.createProjectWithAdditionalExprs(right,
+              ImmutableList.of(
+                  Pair.of(rexBuilder.makeLiteral(true), "nullIndicator")));
 
-      Join join = (Join) d.relBuilder.push(left).push(right)
-          .join(joinType, joinCond).build();
+      Join join =
+          (Join) d.relBuilder
+              .push(left)
+              .push(right)
+              .join(joinType, joinCond)
+              .build();
 
       // To the consumer of joinOutputProjRel, nullIndicator is located
       // at the end

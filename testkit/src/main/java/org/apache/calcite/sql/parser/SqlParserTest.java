@@ -15,7 +15,6 @@
  * limitations under the License.
  */
 package org.apache.calcite.sql.parser;
-
 import org.apache.calcite.avatica.util.Quoting;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlDialect;
@@ -80,6 +79,8 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.hasToString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -112,7 +113,7 @@ public class SqlParserTest {
    * this list, flagged "c". If the keyword is not intended to be a reserved
    * keyword, add it to the non-reserved keyword list in the parser.
    */
-  private static final List<String> RESERVED_KEYWORDS = ImmutableList.of(
+  private static final String[] RESERVED_KEYWORDS = {
       "ABS",                                               "2011", "2014", "c",
       "ABSOLUTE",                      "92", "99",
       "ACTION",                        "92", "99",
@@ -583,7 +584,8 @@ public class SqlParserTest {
       "WRITE",                         "92", "99",
       "YEAR",                          "92", "99", "2003", "2011", "2014", "c",
       "YEARS",                                             "2011",
-      "ZONE",                          "92", "99");
+      "ZONE",                          "92", "99",
+  };
 
   private static final String ANY = "(?s).*";
 
@@ -745,6 +747,52 @@ public class SqlParserTest {
         .fails("(?s)Encountered \"\\. \\*\" at .*");
     sql("select emp.empno AS x from ^*^")
         .fails("(?s)Encountered \"\\*\" at .*");
+  }
+
+  @Test void testPercentileCont() {
+    sql("select percentile_cont(.5) within group (order by 3) from t")
+        .ok("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY 3)\n"
+            + "FROM `T`");
+  }
+
+  @Test void testPercentileDisc() {
+    sql("select percentile_disc(.5) within group (order by 3) from t")
+        .ok("SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY 3)\n"
+            + "FROM `T`");
+  }
+
+  /** Tests BigQuery's variant of PERCENTILE_CONT, which uses OVER rather than
+   * WITHIN GROUP, and allows RESPECT/IGNORE NULLS inside the parentheses. */
+  @Test void testPercentileContBigQuery() {
+    sql("select percentile_cont(x, .5) over() from unnest(array[1,2,3,4]) as x")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (PERCENTILE_CONT(x, 0.5) OVER ())\n"
+            + "FROM UNNEST((ARRAY[1, 2, 3, 4])) AS x");
+    sql("select percentile_cont(x, .5 RESPECT NULLS) over() from unnest(array[1,2,3,4]) as x")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (PERCENTILE_CONT(x, 0.5) RESPECT NULLS OVER ())\n"
+            + "FROM UNNEST((ARRAY[1, 2, 3, 4])) AS x");
+    sql("select percentile_cont(x, .5 IGNORE NULLS) over() from unnest(array[1,null,3,4]) as x")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (PERCENTILE_CONT(x, 0.5) IGNORE NULLS OVER ())\n"
+            + "FROM UNNEST((ARRAY[1, NULL, 3, 4])) AS x");
+  }
+
+  /** Tests BigQuery's variant of PERCENTILE_DISC, which uses OVER rather than
+   * WITHIN GROUP, and allows RESPECT/IGNORE NULLS inside the parentheses. */
+  @Test void testPercentileDiscBigQuery() {
+    sql("select percentile_disc(x, .5) over() from unnest(array[1,2,3,4]) as x")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (PERCENTILE_DISC(x, 0.5) OVER ())\n"
+            + "FROM UNNEST((ARRAY[1, 2, 3, 4])) AS x");
+    sql("select percentile_disc(x, .5 RESPECT NULLS) over() from unnest(array[1,2,3,4]) as x")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (PERCENTILE_DISC(x, 0.5) RESPECT NULLS OVER ())\n"
+            + "FROM UNNEST((ARRAY[1, 2, 3, 4])) AS x");
+    sql("select percentile_disc(x, .5 IGNORE NULLS) over() from unnest(array[1,null,3,4]) as x")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (PERCENTILE_DISC(x, 0.5) IGNORE NULLS OVER ())\n"
+            + "FROM UNNEST((ARRAY[1, NULL, 3, 4])) AS x");
   }
 
   @Test void testHyphenatedTableName() {
@@ -1713,6 +1761,25 @@ public class SqlParserTest {
         .fails("(?s).*Encountered \"without\" at line 1, column 23.\n.*");
   }
 
+  /** Test for MSSQL CONVERT parsing, with focus on iffy DATE type and
+   * testing that the extra "style" operand is parsed
+   * Other tests are defined in functions.iq
+   */
+  @Test void testMssqlConvert() {
+    expr("CONVERT(VARCHAR(5), 'xx')")
+        .same();
+    expr("CONVERT(VARCHAR(5), 'xx')")
+        .same();
+    expr("CONVERT(VARCHAR(5), NULL)")
+        .same();
+    expr("CONVERT(VARCHAR(5), NULL, NULL)")
+        .same();
+    expr("CONVERT(DATE, 'xx', 121)")
+        .same();
+    expr("CONVERT(DATE, 'xx')")
+        .same();
+  }
+
   @Test void testLikeAndSimilar() {
     sql("select * from t where x like '%abc%'")
         .ok("SELECT *\n"
@@ -1981,23 +2048,23 @@ public class SqlParserTest {
 
   @Test void testSubstring() {
     expr("substring('a'\nFROM \t  1)")
-        .ok("SUBSTRING('a' FROM 1)");
+        .ok("SUBSTRING('a', 1)");
     expr("substring('a' FROM 1 FOR 3)")
-        .ok("SUBSTRING('a' FROM 1 FOR 3)");
+        .ok("SUBSTRING('a', 1, 3)");
     expr("substring('a' FROM 'reg' FOR '\\')")
-        .ok("SUBSTRING('a' FROM 'reg' FOR '\\')");
+        .ok("SUBSTRING('a', 'reg', '\\')");
 
     expr("substring('a', 'reg', '\\')")
-        .ok("SUBSTRING('a' FROM 'reg' FOR '\\')");
+        .ok("SUBSTRING('a', 'reg', '\\')");
     expr("substring('a', 1, 2)")
-        .ok("SUBSTRING('a' FROM 1 FOR 2)");
+        .ok("SUBSTRING('a', 1, 2)");
     expr("substring('a' , 1)")
-        .ok("SUBSTRING('a' FROM 1)");
+        .ok("SUBSTRING('a', 1)");
   }
 
   @Test void testFunction() {
     sql("select substring('Eggs and ham', 1, 3 + 2) || ' benedict' from emp")
-        .ok("SELECT (SUBSTRING('Eggs and ham' FROM 1 FOR (3 + 2)) || ' benedict')\n"
+        .ok("SELECT (SUBSTRING('Eggs and ham', 1, (3 + 2)) || ' benedict')\n"
             + "FROM `EMP`");
     expr("log10(1)\r\n"
         + "+power(2, mod(\r\n"
@@ -5328,10 +5395,23 @@ public class SqlParserTest {
   }
 
   @Test void testConvertAndTranslate() {
-    expr("convert('abc' using conversion)")
-        .ok("CONVERT('abc' USING `CONVERSION`)");
+    expr("convert('abc', utf8, utf16)")
+        .ok("CONVERT('abc', `UTF8`, `UTF16`)");
+    sql("select convert(name, latin1, gbk) as newName from t")
+        .ok("SELECT CONVERT(`NAME`, `LATIN1`, `GBK`) AS `NEWNAME`\n"
+            + "FROM `T`");
+
+    expr("convert('abc' using utf8)")
+        .ok("TRANSLATE('abc', `UTF8`)");
+    sql("select convert(name using gbk) as newName from t")
+        .ok("SELECT TRANSLATE(`NAME`, `GBK`) AS `NEWNAME`\n"
+            + "FROM `T`");
+
     expr("translate('abc' using lazy_translation)")
-        .ok("TRANSLATE('abc' USING `LAZY_TRANSLATION`)");
+        .ok("TRANSLATE('abc', `LAZY_TRANSLATION`)");
+    sql("select translate(name using utf8) as newName from t")
+        .ok("SELECT TRANSLATE(`NAME`, `UTF8`) AS `NEWNAME`\n"
+            + "FROM `T`");
   }
 
   @Test void testTranslate3() {
@@ -5491,6 +5571,72 @@ public class SqlParserTest {
     sql("select sum(x) over (order by x) from bids")
         .ok("SELECT (SUM(`X`) OVER (ORDER BY `X`))\n"
             + "FROM `BIDS`");
+  }
+
+  @Test void testQualify() {
+    final String sql = "SELECT empno, ename,\n"
+        + " ROW_NUMBER() over (partition by ename order by deptno) as rn\n"
+        + "FROM emp\n"
+        + "QUALIFY rn = 1";
+    final String expected = "SELECT `EMPNO`, `ENAME`,"
+        + " (ROW_NUMBER() OVER (PARTITION BY `ENAME` ORDER BY `DEPTNO`)) AS `RN`\n"
+        + "FROM `EMP`\n"
+        + "QUALIFY (`RN` = 1)";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testQualifyWithoutAlias() {
+    final String sql = "SELECT empno, ename\n"
+        + "FROM emp\n"
+        + "QUALIFY ROW_NUMBER() over (partition by ename order by deptno) = 1";
+    final String expected = "SELECT `EMPNO`, `ENAME`\n"
+        + "FROM `EMP`\n"
+        + "QUALIFY ((ROW_NUMBER() OVER (PARTITION BY `ENAME` ORDER BY `DEPTNO`)) = 1)";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testQualifyWithWindowClause() {
+    final String sql = "SELECT empno, ename,\n"
+        + " SUM(deptno) OVER myWindow as sumDeptNo\n"
+        + "FROM emp\n"
+        + "WINDOW myWindow AS (PARTITION BY ename ORDER BY empno)\n"
+        + "QUALIFY sumDeptNo = 1";
+    final String expected = "SELECT `EMPNO`, `ENAME`,"
+        + " (SUM(`DEPTNO`) OVER `MYWINDOW`) AS `SUMDEPTNO`\n"
+        + "FROM `EMP`\n"
+        + "WINDOW `MYWINDOW` AS (PARTITION BY `ENAME` ORDER BY `EMPNO`)\n"
+        + "QUALIFY (`SUMDEPTNO` = 1)";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testQualifyWithEverything() {
+    final String sql = "SELECT DISTINCT ename,\n"
+        + " SUM(deptno) OVER (PARTITION BY ename) as r\n"
+        + "FROM emp\n"
+        + "WHERE deptno > 3\n"
+        + "GROUP BY ename, deptno\n"
+        + "HAVING SUM(empno) > 4\n"
+        + "QUALIFY sumDeptNo = 1\n"
+        + "ORDER BY ename\n"
+        + "LIMIT 5\n";
+    final String expected = "SELECT DISTINCT `ENAME`,"
+        + " (SUM(`DEPTNO`) OVER (PARTITION BY `ENAME`)) AS `R`\n"
+        + "FROM `EMP`\n"
+        + "WHERE (`DEPTNO` > 3)\n"
+        + "GROUP BY `ENAME`, `DEPTNO`\n"
+        + "HAVING (SUM(`EMPNO`) > 4)\n"
+        + "QUALIFY (`SUMDEPTNO` = 1)\n"
+        + "ORDER BY `ENAME`\n"
+        + "FETCH NEXT 5 ROWS ONLY";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testQualifyIllegalAfterOrder() {
+    final String sql = "SELECT x\n"
+        + "FROM t\n"
+        + "ORDER BY 1 DESC\n"
+        + "^QUALIFY^ x = 1";
+    sql(sql).fails("(?s).*Encountered \"QUALIFY\" at .*");
   }
 
   @Test void testNullTreatment() {
@@ -5774,6 +5920,11 @@ public class SqlParserTest {
         .ok("(ARRAY[(ROW(1, 'a')), (ROW(2, 'b'))])");
   }
 
+  @Test void testArrayFunction() {
+    expr("array()").ok("ARRAY()");
+    expr("array(1)").ok("ARRAY(1)");
+  }
+
   @Test void testArrayQueryConstructor() {
     sql("SELECT array(SELECT x FROM (VALUES(1)) x)")
         .ok("SELECT (ARRAY ((SELECT `X`\n"
@@ -5782,6 +5933,10 @@ public class SqlParserTest {
         .ok("SELECT (ARRAY (SELECT `X`\n"
             + "FROM (VALUES (ROW(1))) AS `X`\n"
             + "ORDER BY `X`))");
+    sql("SELECT array(SELECT x FROM (VALUES(1)) x, ^SELECT^ x FROM (VALUES(1)) x)")
+      .fails("(?s)Incorrect syntax near the keyword 'SELECT' at.*");
+    sql("SELECT array(1, ^SELECT^ x FROM (VALUES(1)) x)")
+      .fails("(?s)Incorrect syntax near the keyword 'SELECT'.*");
   }
 
   @Test void testCastAsCollectionType() {
@@ -6369,7 +6524,7 @@ public class SqlParserTest {
       messages.add("Warning: use of non-standard feature '" + token + "'");
     }
     return throwables -> {
-      assertThat(throwables.size(), is(messages.size()));
+      assertThat(throwables, hasSize(messages.size()));
       for (Pair<? extends Throwable, String> pair : Pair.zip(throwables, messages)) {
         assertThat(pair.left.getMessage(), containsString(pair.right));
       }
@@ -6515,9 +6670,9 @@ public class SqlParserTest {
     expr("extract(microsecond from d)").ok("EXTRACT(MICROSECOND FROM `D`)");
 
     // As for FLOOR, so for DATE_TRUNC.
-    expr("date_trunc(d , year)").ok("DATE_TRUNC(`D`, YEAR)");
-    expr("date_trunc(d , y)").ok("DATE_TRUNC(`D`, `Y`)");
-    expr("date_trunc(d , week(tuesday))").ok("DATE_TRUNC(`D`, `WEEK_TUESDAY`)");
+    expr("date_trunc(d , year)").ok("(DATE_TRUNC(`D`, YEAR))");
+    expr("date_trunc(d , y)").ok("(DATE_TRUNC(`D`, `Y`))");
+    expr("date_trunc(d , week(tuesday))").ok("(DATE_TRUNC(`D`, `WEEK_TUESDAY`))");
   }
 
   @Test void testGeometry() {
@@ -8829,7 +8984,7 @@ public class SqlParserTest {
         + "from emp /* comment with 'quoted string'? */ as e\n"
         + "where deptno < ?3\n"
         + "and hiredate > ?4";
-    assertThat(hoisted.toString(), is(expected));
+    assertThat(hoisted, hasToString(expected));
 
     // As above, using the function explicitly.
     assertThat(hoisted.substitute(Hoist::ordinalString), is(expected));
@@ -8922,7 +9077,7 @@ public class SqlParserTest {
         @Nullable SqlDialect dialect, UnaryOperator<String> converter,
         List<String> expected) {
       final SqlNodeList sqlNodeList = parseStmtsAndHandleEx(factory, sap.sql);
-      assertThat(sqlNodeList.size(), is(expected.size()));
+      assertThat(sqlNodeList, hasSize(expected.size()));
 
       final SqlWriterConfig sqlWriterConfig =
           SQL_WRITER_CONFIG.withDialect(
@@ -9108,7 +9263,7 @@ public class SqlParserTest {
 
     static void checkList(SqlNodeList sqlNodeList,
         UnaryOperator<String> converter, List<String> expected) {
-      assertThat(sqlNodeList.size(), is(expected.size()));
+      assertThat(sqlNodeList, hasSize(expected.size()));
 
       for (int i = 0; i < sqlNodeList.size(); i++) {
         SqlNode sqlNode = sqlNodeList.get(i);

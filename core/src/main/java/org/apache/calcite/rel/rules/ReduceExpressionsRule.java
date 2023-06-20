@@ -35,6 +35,7 @@ import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalWindow;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
@@ -574,9 +575,10 @@ public abstract class ReduceExpressionsRule<C extends ReduceExpressionsRule.Conf
         for (Window.RexWinAggCall aggCall : group.aggCalls) {
           final List<RexNode> expList = new ArrayList<>(aggCall.getOperands());
           if (reduceExpressions(window, expList, predicates)) {
-            aggCall = new Window.RexWinAggCall(
-                (SqlAggFunction) aggCall.getOperator(), aggCall.type, expList,
-                aggCall.ordinal, aggCall.distinct, aggCall.ignoreNulls);
+            aggCall =
+                new Window.RexWinAggCall((SqlAggFunction) aggCall.getOperator(),
+                    aggCall.type, expList,
+                    aggCall.ordinal, aggCall.distinct, aggCall.ignoreNulls);
             reduced = true;
           }
           aggCalls.add(aggCall);
@@ -706,8 +708,9 @@ public abstract class ReduceExpressionsRule<C extends ReduceExpressionsRule.Conf
 
     // Simplify predicates in place
     final RexUnknownAs unknownAs = RexUnknownAs.falseIf(unknownAsFalse);
-    final boolean reduced = reduceExpressionsInternal(rel, simplify, unknownAs,
-        expList, predicates, treatDynamicCallsAsConstant);
+    final boolean reduced =
+        reduceExpressionsInternal(rel, simplify, unknownAs,
+            expList, predicates, treatDynamicCallsAsConstant);
 
     boolean simplified = false;
     for (int i = 0; i < expList.size(); i++) {
@@ -957,8 +960,8 @@ public abstract class ReduceExpressionsRule<C extends ReduceExpressionsRule.Conf
         // If we make 'abc' of type VARCHAR(4), we may later encounter
         // the same expression in a Project's digest where it has
         // type VARCHAR(3), and that's wrong.
-        replacement =
-            simplify.rexBuilder.makeAbstractCast(call.getType(), replacement);
+        RelDataType type = call.getType();
+        replacement = simplify.rexBuilder.makeAbstractCast(type, replacement, false);
       }
       return replacement;
     }

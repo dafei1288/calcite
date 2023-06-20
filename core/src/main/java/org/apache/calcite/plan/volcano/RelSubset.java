@@ -24,6 +24,7 @@ import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTrait;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.hep.HepRelVertex;
 import org.apache.calcite.rel.AbstractRelNode;
 import org.apache.calcite.rel.PhysicalNode;
 import org.apache.calcite.rel.RelNode;
@@ -159,7 +160,7 @@ public class RelSubset extends AbstractRelNode {
    * Computes the best {@link RelNode} in this subset.
    *
    * <p>Only necessary when a subset is created in a set that has subsets that
-   * subsume it. Rationale:</p>
+   * subsume it. Rationale:
    *
    * <ol>
    * <li>If the are no subsuming subsets, the subset is initially empty.</li>
@@ -235,6 +236,10 @@ public class RelSubset extends AbstractRelNode {
     return requireNonNull(getOriginal(), "both best and original nodes are null");
   }
 
+  @Override public RelNode stripped() {
+    return getBestOrOriginal();
+  }
+
   @Override public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
     if (inputs.isEmpty()) {
       final RelTraitSet traitSet1 = traitSet.simplify();
@@ -295,6 +300,7 @@ public class RelSubset extends AbstractRelNode {
         // see usage of this method in propagateCostImprovements0()
         if (rel == this) {
           list.add(parent);
+          break;
         }
       }
     }
@@ -311,6 +317,7 @@ public class RelSubset extends AbstractRelNode {
       for (RelSubset rel : inputSubsets(parent)) {
         if (rel.set == set && rel.getTraitSet().equals(traitSet)) {
           list.add(planner.getSubsetNonNull(parent));
+          break;
         }
       }
     }
@@ -348,6 +355,7 @@ public class RelSubset extends AbstractRelNode {
    * Adds expression <code>rel</code> to this subset.
    */
   void add(RelNode rel) {
+    assert !(rel instanceof HepRelVertex);
     if (set.rels.contains(rel)) {
       return;
     }

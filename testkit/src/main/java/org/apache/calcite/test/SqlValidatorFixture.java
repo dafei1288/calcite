@@ -59,6 +59,7 @@ import static org.apache.calcite.sql.SqlUtil.stripAs;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.hasToString;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import static java.util.Objects.requireNonNull;
@@ -180,13 +181,13 @@ public class SqlValidatorFixture {
     return withValidatorConfig(c -> c.withLenientOperatorLookup(lenient));
   }
 
-  SqlValidatorFixture withWhole(boolean whole) {
+  public SqlValidatorFixture withWhole(boolean whole) {
     Preconditions.checkArgument(sap.cursor < 0);
     final StringAndPos sap = StringAndPos.of("^" + this.sap.sql + "^");
     return new SqlValidatorFixture(tester, factory, sap, expression, whole);
   }
 
-  SqlValidatorFixture ok() {
+  public SqlValidatorFixture ok() {
     tester.assertExceptionIsThrown(factory, toSql(false), null);
     return this;
   }
@@ -194,7 +195,7 @@ public class SqlValidatorFixture {
   /**
    * Checks that a SQL expression gives a particular error.
    */
-  SqlValidatorFixture fails(String expected) {
+  public SqlValidatorFixture fails(String expected) {
     requireNonNull(expected, "expected");
     tester.assertExceptionIsThrown(factory, toSql(true), expected);
     return this;
@@ -204,7 +205,7 @@ public class SqlValidatorFixture {
    * Checks that a SQL expression fails, giving an {@code expected} error,
    * if {@code b} is true, otherwise succeeds.
    */
-  SqlValidatorFixture failsIf(boolean b, String expected) {
+  public SqlValidatorFixture failsIf(boolean b, String expected) {
     if (b) {
       fails(expected);
     } else {
@@ -271,7 +272,7 @@ public class SqlValidatorFixture {
     tester.validateAndThen(factory, sap, (sap, validator, validatedNode) -> {
       final RelDataType parameterRowType =
           validator.getParameterRowType(validatedNode);
-      assertThat(parameterRowType.toString(), matcher);
+      assertThat(parameterRowType, hasToString(matcher));
     });
     return this;
   }
@@ -425,7 +426,7 @@ public class SqlValidatorFixture {
         }
       }
       buf.append("}");
-      assertThat(buf.toString(), matcher);
+      assertThat(buf, hasToString(matcher));
     });
     return this;
   }

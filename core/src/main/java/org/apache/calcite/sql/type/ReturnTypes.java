@@ -246,12 +246,20 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference BOOLEAN =
       explicit(SqlTypeName.BOOLEAN);
+
   /**
    * Type-inference strategy whereby the result type of a call is Boolean,
    * with nulls allowed if any of the operands allow nulls.
    */
   public static final SqlReturnTypeInference BOOLEAN_NULLABLE =
       BOOLEAN.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
+   * Type-inference strategy whereby the result type of a call is Boolean,
+   * with nulls allowed if the type of the operand #0 (0-based) is nullable.
+   */
+  public static final SqlReturnTypeInference BOOLEAN_NULLABLE_IF_ARG0_NULLABLE =
+      BOOLEAN.andThen(SqlTypeTransforms.ARG0_NULLABLE);
 
   /**
    * Type-inference strategy with similar effect to {@link #BOOLEAN_NULLABLE},
@@ -303,6 +311,31 @@ public abstract class ReturnTypes {
       DATE.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
+   * Type-inference strategy that returns the type of the first operand,
+   * unless it is a DATE, in which case the return type is TIMESTAMP. Supports
+   * cases such as <a href="https://issues.apache.org/jira/browse/CALCITE-5757">[CALCITE-5757]
+   * Incorrect return type for BigQuery TRUNC functions </a>.
+   */
+  public static final SqlReturnTypeInference ARG0_EXCEPT_DATE = opBinding -> {
+    RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
+    SqlTypeName op = opBinding.getOperandType(0).getSqlTypeName();
+    switch (op) {
+    case DATE:
+      return typeFactory.createSqlType(SqlTypeName.TIMESTAMP);
+    default:
+      return typeFactory.createSqlType(op);
+    }
+  };
+
+  /**
+   * Same as {@link #ARG0_EXCEPT_DATE} but returns with nullability if any of
+   * the operands is nullable by using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NULLABLE}.
+   */
+  public static final SqlReturnTypeInference ARG0_EXCEPT_DATE_NULLABLE =
+      ARG0_EXCEPT_DATE.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
    * Type-inference strategy whereby the result type of a call is TIME(0).
    */
   public static final SqlReturnTypeInference TIME =
@@ -334,6 +367,13 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference TIMESTAMP_LTZ =
       explicit(SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE);
+
+  /**
+   * Type-inference strategy whereby the result type of a call is nullable
+   * TIMESTAMP WITH LOCAL TIME ZONE.
+   */
+  public static final SqlReturnTypeInference TIMESTAMP_LTZ_NULLABLE =
+      TIMESTAMP_LTZ.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
    * Type-inference strategy whereby the result type of a call is Double.
@@ -421,6 +461,19 @@ public abstract class ReturnTypes {
       VARCHAR_2000.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
+   * Type-inference strategy that always returns "VARCHAR".
+   */
+  public static final SqlReturnTypeInference VARCHAR =
+      ReturnTypes.explicit(SqlTypeName.VARCHAR);
+
+  /**
+   * Type-inference strategy that always returns "VARCHAR" with nulls
+   * allowed if any of the operands allow nulls.
+   */
+  public static final SqlReturnTypeInference VARCHAR_NULLABLE =
+      VARCHAR.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
    * Type-inference strategy for Histogram agg support.
    */
   public static final SqlReturnTypeInference HISTOGRAM =
@@ -481,6 +534,21 @@ public abstract class ReturnTypes {
   };
 
   /**
+   * Returns the element type of a ARRAY or MULTISET.
+   *
+   * <p>For example, given <code>INTEGER ARRAY or MULTISET ARRAY</code>, returns
+   * <code>INTEGER</code>.
+   */
+  public static final SqlReturnTypeInference TO_COLLECTION_ELEMENT =
+      ARG0.andThen(SqlTypeTransforms.TO_COLLECTION_ELEMENT_TYPE);
+
+  public static final SqlReturnTypeInference TO_COLLECTION_ELEMENT_NULLABLE =
+      TO_COLLECTION_ELEMENT.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  public static final SqlReturnTypeInference TO_COLLECTION_ELEMENT_FORCE_NULLABLE =
+      TO_COLLECTION_ELEMENT.andThen(SqlTypeTransforms.FORCE_NULLABLE);
+
+  /**
    * Returns a MULTISET type.
    *
    * <p>For example, given <code>INTEGER</code>, returns
@@ -493,7 +561,7 @@ public abstract class ReturnTypes {
    * Returns the element type of a MULTISET.
    */
   public static final SqlReturnTypeInference MULTISET_ELEMENT_NULLABLE =
-      MULTISET.andThen(SqlTypeTransforms.TO_MULTISET_ELEMENT_TYPE);
+      MULTISET.andThen(SqlTypeTransforms.TO_COLLECTION_ELEMENT_TYPE);
 
   /**
    * Same as {@link #MULTISET} but returns with nullability if any of the
@@ -528,6 +596,51 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference TO_MAP =
       ARG0.andThen(SqlTypeTransforms.TO_MAP);
+
+  /**
+   * Returns a ROW type.
+   *
+   * <p>For example, given {@code (INTEGER, DATE) MAP}, returns
+   * {@code Record(f0: INTEGER, f1: DATE)}.
+   */
+  public static final SqlReturnTypeInference TO_ROW =
+      ARG0.andThen(SqlTypeTransforms.TO_ROW);
+
+  /**
+   * Returns a ARRAY type.
+   *
+   * <p>For example, given {@code (INTEGER, DATE) MAP}, returns
+   * {@code Record(f0: INTEGER, f1: DATE) ARRAY}.
+   */
+  public static final SqlReturnTypeInference TO_MAP_ENTRIES =
+      TO_ROW.andThen(SqlTypeTransforms.TO_ARRAY);
+
+  public static final SqlReturnTypeInference TO_MAP_ENTRIES_NULLABLE =
+      TO_MAP_ENTRIES.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
+   * Returns a ARRAY type.
+   *
+   * <p>For example, given {@code (INTEGER, DATE) MAP}, returns
+   * {@code INTEGER ARRAY}.
+   */
+  public static final SqlReturnTypeInference TO_MAP_KEYS =
+      ARG0.andThen(SqlTypeTransforms.TO_MAP_KEYS);
+
+  public static final SqlReturnTypeInference TO_MAP_KEYS_NULLABLE =
+      TO_MAP_KEYS.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
+   * Returns a ARRAY type.
+   *
+   * <p>For example, given {@code (INTEGER, DATE) MAP}, returns
+   * {@code DATE ARRAY}.
+   */
+  public static final SqlReturnTypeInference TO_MAP_VALUES =
+      ARG0.andThen(SqlTypeTransforms.TO_MAP_VALUES);
+
+  public static final SqlReturnTypeInference TO_MAP_VALUES_NULLABLE =
+      TO_MAP_VALUES.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
    * Type-inference strategy that always returns GEOMETRY.
@@ -743,10 +856,12 @@ public abstract class ReturnTypes {
                     argType1.getFullTypeString()));
           }
 
-          pickedCollation = requireNonNull(
-              SqlCollation.getCoercibilityDyadicOperator(
-                  getCollation(argType0), getCollation(argType1)),
-              () -> "getCoercibilityDyadicOperator is null for " + argType0 + " and " + argType1);
+          pickedCollation =
+              requireNonNull(
+                  SqlCollation.getCoercibilityDyadicOperator(
+                      getCollation(argType0), getCollation(argType1)),
+                  () -> "getCoercibilityDyadicOperator is null for " + argType0
+                      + " and " + argType1);
         }
 
         // Determine whether result is variable-length
@@ -786,8 +901,9 @@ public abstract class ReturnTypes {
                   getCharset(pickedType), getCollation(pickedType));
         }
         if (ret.getSqlTypeName() == SqlTypeName.NULL) {
-          ret = typeFactory.createTypeWithNullability(
-              typeFactory.createSqlType(SqlTypeName.VARCHAR), true);
+          ret =
+              typeFactory.createTypeWithNullability(
+                  typeFactory.createSqlType(SqlTypeName.VARCHAR), true);
         }
         return ret;
       };
@@ -798,13 +914,13 @@ public abstract class ReturnTypes {
    * For example,
    *
    * <p>concat(cast('a' as varchar(2)), cast('b' as varchar(3)),cast('c' as varchar(2)))
-   * returns varchar(7).</p>
+   * returns varchar(7).
    *
    * <p>concat(cast('a' as varchar), cast('b' as varchar(2), cast('c' as varchar(2))))
-   * returns varchar.</p>
+   * returns varchar.
    *
    * <p>concat(cast('a' as varchar(65535)), cast('b' as varchar(2)), cast('c' as varchar(2)))
-   * returns varchar.</p>
+   * returns varchar.
    */
   public static final SqlReturnTypeInference MULTIVALENT_STRING_SUM_PRECISION =
       opBinding -> {
@@ -843,6 +959,20 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference MULTIVALENT_STRING_SUM_PRECISION_NULLABLE =
       MULTIVALENT_STRING_SUM_PRECISION.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
+   * Same as {@link #MULTIVALENT_STRING_SUM_PRECISION} and using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NOT_NULLABLE}.
+   */
+  public static final SqlReturnTypeInference MULTIVALENT_STRING_SUM_PRECISION_NOT_NULLABLE =
+      MULTIVALENT_STRING_SUM_PRECISION.andThen(SqlTypeTransforms.TO_NOT_NULLABLE);
+
+  /**
+   * Same as {@link #MULTIVALENT_STRING_SUM_PRECISION} and using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NULLABLE_ALL}.
+   */
+  public static final SqlReturnTypeInference MULTIVALENT_STRING_SUM_PRECISION_NULLABLE_ALL =
+      MULTIVALENT_STRING_SUM_PRECISION.andThen(SqlTypeTransforms.TO_NULLABLE_ALL);
 
   /**
    * Same as {@link #DYADIC_STRING_SUM_PRECISION} and using

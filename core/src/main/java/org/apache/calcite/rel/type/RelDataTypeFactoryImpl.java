@@ -18,11 +18,13 @@ package org.apache.calcite.rel.type;
 
 import org.apache.calcite.linq4j.tree.Primitive;
 import org.apache.calcite.sql.SqlCollation;
+import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.type.ArraySqlType;
 import org.apache.calcite.sql.type.JavaToSqlTypeConversionRules;
 import org.apache.calcite.sql.type.MapSqlType;
 import org.apache.calcite.sql.type.MultisetSqlType;
 import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.type.SqlTypeMappingRule;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.util.Util;
@@ -47,6 +49,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * Abstract base for implementations of {@link RelDataTypeFactory}.
@@ -109,7 +115,7 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
 
   /** Creates a type factory. */
   protected RelDataTypeFactoryImpl(RelDataTypeSystem typeSystem) {
-    this.typeSystem = Objects.requireNonNull(typeSystem, "typeSystem");
+    this.typeSystem = requireNonNull(typeSystem, "typeSystem");
   }
 
   //~ Methods ----------------------------------------------------------------
@@ -212,9 +218,11 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
         }, nullable);
   }
 
-  @Override public @Nullable RelDataType leastRestrictive(List<RelDataType> types) {
-    assert types != null;
-    assert types.size() >= 1;
+  @Override public @Nullable RelDataType leastRestrictive(
+      List<RelDataType> types, SqlTypeMappingRule mappingRule) {
+    requireNonNull(types, "types");
+    requireNonNull(mappingRule, "mappingRule");
+    checkArgument(types.size() >= 1, "types.size >= 1");
     RelDataType type0 = types.get(0);
     if (type0.isStruct()) {
       return leastRestrictiveStructuredType(types);
@@ -251,8 +259,9 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       // first type?
       final int k = j;
 
-      RelDataType type = leastRestrictive(
-          Util.transform(types, t -> t.getFieldList().get(k).getType()));
+      RelDataType type =
+          leastRestrictive(
+              Util.transform(types, t -> t.getFieldList().get(k).getType()));
       if (type == null) {
         return null;
       }
@@ -273,11 +282,12 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       }
       isNullable |= type.isNullable();
     }
-    final RelDataType type = leastRestrictive(
-        Util.transform(types,
-            t -> t instanceof ArraySqlType
-                ? ((ArraySqlType) t).getComponentType()
-                : ((MultisetSqlType) t).getComponentType()));
+    final RelDataType type =
+        leastRestrictive(
+            Util.transform(types,
+                t -> t instanceof ArraySqlType
+                    ? ((ArraySqlType) t).getComponentType()
+                    : ((MultisetSqlType) t).getComponentType()));
     if (type == null) {
       return null;
     }
@@ -296,17 +306,39 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       }
       isNullable |= type.isNullable();
     }
-    final RelDataType keyType = leastRestrictive(
-        Util.transform(types, t -> ((MapSqlType) t).getKeyType()));
+    final RelDataType keyType =
+        leastRestrictive(
+            Util.transform(types, t -> ((MapSqlType) t).getKeyType()));
     if (keyType == null) {
       return null;
     }
-    final RelDataType valueType = leastRestrictive(
-        Util.transform(types, t -> ((MapSqlType) t).getValueType()));
+    final RelDataType valueType =
+        leastRestrictive(
+            Util.transform(types, t -> ((MapSqlType) t).getValueType()));
     if (valueType == null) {
       return null;
     }
     return new MapSqlType(keyType, valueType, isNullable);
+  }
+
+  protected RelDataType leastRestrictiveIntervalDatetimeType(
+      final RelDataType dateTimeType, final RelDataType type1) {
+    assert SqlTypeUtil.isDatetime(dateTimeType);
+    if (SqlTypeUtil.isIntType(type1)) {
+      return dateTimeType;
+    }
+    final SqlIntervalQualifier intervalQualifier = type1.getIntervalQualifier();
+    requireNonNull(intervalQualifier, "intervalQualifier");
+    if (!dateTimeType.getSqlTypeName().allowsPrec()
+        || intervalQualifier.useDefaultFractionalSecondPrecision()
+        || intervalQualifier.getFractionalSecondPrecision(typeSystem)
+            <= dateTimeType.getPrecision()) {
+      return dateTimeType;
+    } else {
+      return
+          createSqlType(dateTimeType.getSqlTypeName(),
+              intervalQualifier.getFractionalSecondPrecision(typeSystem));
+    }
   }
 
   // copy a non-record type, setting nullability
@@ -370,7 +402,7 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
   @Override public RelDataType createTypeWithNullability(
       final RelDataType type,
       final boolean nullable) {
-    Objects.requireNonNull(type, "type");
+    requireNonNull(type, "type");
     RelDataType newType;
     if (type.isNullable() == nullable) {
       newType = type;
@@ -411,14 +443,14 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
    *
    * <p>This approach allows us to use a cheap temporary key. A permanent
    * key is more expensive, because it must be immutable and not hold
-   * references into other data structures.</p>
+   * references into other data structures.
    */
   protected RelDataType canonize(final StructKind kind,
       final List<String> names,
       final List<RelDataType> types,
       final boolean nullable) {
-    final RelDataType type = KEY2TYPE_CACHE.getIfPresent(
-        new Key(kind, names, types, nullable));
+    final RelDataType type =
+        KEY2TYPE_CACHE.getIfPresent(new Key(kind, names, types, nullable));
     if (type != null) {
       return type;
     }
@@ -476,8 +508,9 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       List<RelDataTypeField> fields = type.getFieldList();
       for (RelDataTypeField field : fields) {
         if (field.getIndex() != fieldList.size()) {
-          field = new RelDataTypeFieldImpl(field.getName(), fieldList.size(),
-              field.getType());
+          field =
+              new RelDataTypeFieldImpl(field.getName(), fieldList.size(),
+                  field.getType());
         }
         fieldList.add(field);
       }

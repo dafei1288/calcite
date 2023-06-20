@@ -189,6 +189,7 @@ public abstract class Window extends SingleRel implements Hintable {
 
   /**
    * Returns constants that are additional inputs of current relation.
+   *
    * @return constants that are additional inputs of current relation
    */
   public List<RexLiteral> getConstants() {
@@ -340,6 +341,7 @@ public abstract class Window extends SingleRel implements Hintable {
      * Returns if the window is guaranteed to have rows.
      * This is useful to refine data type of window aggregates.
      * For instance sum(non-nullable) over (empty window) is NULL.
+     *
      * @return true when the window is non-empty
      * @see org.apache.calcite.sql.SqlWindow#isAlwaysNonEmpty()
      * @see org.apache.calcite.sql.SqlOperatorBinding#getGroupCount()
@@ -368,7 +370,8 @@ public abstract class Window extends SingleRel implements Hintable {
           final RexWinAggCall aggCall = aggCalls.get(index);
           final SqlAggFunction op = (SqlAggFunction) aggCall.getOperator();
           return AggregateCall.create(op, aggCall.distinct, false,
-              aggCall.ignoreNulls, getProjectOrdinals(aggCall.getOperands()),
+              aggCall.ignoreNulls, ImmutableList.of(),
+              getProjectOrdinals(aggCall.getOperands()),
               -1, null, RelCollations.EMPTY,
               aggCall.getType(), fieldNames.get(aggCall.ordinal));
         }

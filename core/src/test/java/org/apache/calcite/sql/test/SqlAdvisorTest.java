@@ -90,6 +90,8 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
           "TABLE(CATALOG.SALES.EMPTY_PRODUCTS)",
           "TABLE(CATALOG.SALES.EMP_ADDRESS)",
           "TABLE(CATALOG.SALES.DEPT)",
+          "TABLE(CATALOG.SALES.DEPTNULLABLES)",
+          "TABLE(CATALOG.SALES.DEPT_SINGLE)",
           "TABLE(CATALOG.SALES.DEPT_NESTED)",
           "TABLE(CATALOG.SALES.DEPT_NESTED_EXPANDED)",
           "TABLE(CATALOG.SALES.BONUS)",
@@ -208,8 +210,6 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
           "KEYWORD(NULLIF)",
           "KEYWORD(OCTET_LENGTH)",
           "KEYWORD(OVERLAY)",
-          "KEYWORD(PERCENTILE_CONT)",
-          "KEYWORD(PERCENTILE_DISC)",
           "KEYWORD(PERCENT_RANK)",
           "KEYWORD(PERIOD)",
           "KEYWORD(POSITION)",
@@ -223,6 +223,7 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
           "KEYWORD(ROW)",
           "KEYWORD(ROW_NUMBER)",
           "KEYWORD(RUNNING)",
+          "KEYWORD(SAFE_CAST)",
           "KEYWORD(SECOND)",
           "KEYWORD(SESSION_USER)",
           "KEYWORD(SOME)",
@@ -239,6 +240,7 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
           "KEYWORD(TRIM)",
           "KEYWORD(TRUE)",
           "KEYWORD(TRUNCATE)",
+          "KEYWORD(TRY_CAST)",
           "KEYWORD(UNIQUE)",
           "KEYWORD(UNKNOWN)",
           "KEYWORD(UPPER)",
@@ -338,6 +340,7 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
           "KEYWORD(LIMIT)",
           "KEYWORD(GROUP)",
           "KEYWORD(HAVING)",
+          "KEYWORD(QUALIFY)",
           "KEYWORD(INTERSECT)",
           "KEYWORD(ORDER)",
           "KEYWORD(UNION)",
@@ -363,6 +366,7 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
           "KEYWORD(USING)",
           "KEYWORD(OUTER)",
           "KEYWORD(RIGHT)",
+          "KEYWORD(QUALIFY)",
           "KEYWORD(GROUP)",
           "KEYWORD(CROSS)",
           "KEYWORD(,)",
@@ -1139,21 +1143,21 @@ class SqlAdvisorTest extends SqlValidatorTestCase {
 
     // closed double-quote
     sql = replaceQuotes(parserConfig, "select * from t where [^] and x = y");
-    expected = replaceQuotes(parserConfig,
-        "SELECT * FROM t WHERE _suggest_ and x = y");
+    expected =
+        replaceQuotes(parserConfig, "SELECT * FROM t WHERE _suggest_ and x = y");
     fixture.withSql(sql).assertSimplify(expected);
 
     // closed double-quote containing extra stuff
     sql = replaceQuotes(parserConfig, "select * from t where [^foo] and x = y");
-    expected = replaceQuotes(parserConfig,
-        "SELECT * FROM t WHERE _suggest_ and x = y");
+    expected =
+        replaceQuotes(parserConfig, "SELECT * FROM t WHERE _suggest_ and x = y");
     fixture.withSql(sql).assertSimplify(expected);
 
     // escaped double-quote containing extra stuff
-    sql = replaceQuotes(parserConfig,
-        "select * from t where [^f]]oo] and x = y");
-    expected = replaceQuotes(parserConfig,
-        "SELECT * FROM t WHERE _suggest_ and x = y");
+    sql =
+        replaceQuotes(parserConfig, "select * from t where [^f]]oo] and x = y");
+    expected =
+        replaceQuotes(parserConfig, "SELECT * FROM t WHERE _suggest_ and x = y");
     fixture.withSql(sql).assertSimplify(expected);
   }
 

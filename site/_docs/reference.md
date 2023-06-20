@@ -27,7 +27,6 @@ here to appease testAllFunctionsAreDocumented:
 |:-------------- |:---------------------
 | CALL           | TODO: document
 | CLASSIFIER()   | Documented with MATCH_RECOGNIZE
-| CONVERT()      | In SqlStdOperatorTable, but not fully implemented
 | CUME_DIST()    | In SqlStdOperatorTable, but not fully implemented
 | DESC           | Described as part of ORDER BY syntax
 | EQUALS         | Documented as an period operator
@@ -213,6 +212,7 @@ select:
       [ GROUP BY [ ALL | DISTINCT ] { groupItem [, groupItem ]* } ]
       [ HAVING booleanExpression ]
       [ WINDOW windowName AS windowSpec [, windowName AS windowSpec ]* ]
+      [ QUALIFY booleanExpression ]
 
 selectWithoutFrom:
       SELECT [ ALL | DISTINCT ]
@@ -543,10 +543,15 @@ DATA,
 DATABASE,
 **DATE**,
 **DATETIME**,
+DATETIME_DIFF,
 DATETIME_INTERVAL_CODE,
 DATETIME_INTERVAL_PRECISION,
+DATETIME_TRUNC,
+DATE_DIFF,
 DATE_TRUNC,
 **DAY**,
+DAYOFWEEK,
+DAYOFYEAR,
 DAYS,
 **DEALLOCATE**,
 **DEC**,
@@ -794,6 +799,7 @@ OPTIONS,
 **OR**,
 **ORDER**,
 ORDERING,
+**ORDINAL**,
 ORDINALITY,
 OTHERS,
 **OUT**,
@@ -821,8 +827,8 @@ PATH,
 **PATTERN**,
 **PER**,
 **PERCENT**,
-**PERCENTILE_CONT**,
-**PERCENTILE_DISC**,
+PERCENTILE_CONT,
+PERCENTILE_DISC,
 **PERCENT_RANK**,
 **PERIOD**,
 **PERMUTE**,
@@ -845,6 +851,7 @@ PRIOR,
 PRIVILEGES,
 **PROCEDURE**,
 PUBLIC,
+**QUALIFY**,
 QUARTER,
 QUARTERS,
 **RANGE**,
@@ -896,6 +903,9 @@ ROUTINE_SCHEMA,
 ROW_COUNT,
 **ROW_NUMBER**,
 **RUNNING**,
+**SAFE_CAST**,
+**SAFE_OFFSET**,
+**SAFE_ORDINAL**,
 **SATURDAY**,
 **SAVEPOINT**,
 SCALAR,
@@ -1053,6 +1063,7 @@ TRIGGER_SCHEMA,
 **TRIM_ARRAY**,
 **TRUE**,
 **TRUNCATE**,
+**TRY_CAST**,
 **TUESDAY**,
 TUMBLE,
 TYPE,
@@ -1273,9 +1284,9 @@ completeness.
 | value NOT IN (value [, value]*)                   | Whether *value* is not equal to every value in a list
 | value IN (sub-query)                              | Whether *value* is equal to a row returned by *sub-query*
 | value NOT IN (sub-query)                          | Whether *value* is not equal to every row returned by *sub-query*
-| value comparison SOME (sub-query)                 | Whether *value* *comparison* at least one row returned by *sub-query*
-| value comparison ANY (sub-query)                  | Synonym for `SOME`
-| value comparison ALL (sub-query)                  | Whether *value* *comparison* every row returned by *sub-query*
+| value comparison SOME (sub-query or collection)   | Whether *value* *comparison* at least one row returned by *sub-query* or *collection*
+| value comparison ANY (sub-query or collection)    | Synonym for `SOME`
+| value comparison ALL (sub-query or collection)    | Whether *value* *comparison* every row returned by *sub-query* or *collection*
 | EXISTS (sub-query)                                | Whether *sub-query* returns at least one row
 | UNIQUE (sub-query)                                | Whether the rows returned by *sub-query* are unique (ignoring null values)
 
@@ -1351,8 +1362,8 @@ comp:
 | CHARACTER_LENGTH(string)   | As CHAR_LENGTH(*string*)
 | UPPER(string)              | Returns a character string converted to upper case
 | LOWER(string)              | Returns a character string converted to lower case
-| POSITION(string1 IN string2) | Returns the position of the first occurrence of *string1* in *string2*
-| POSITION(string1 IN string2 FROM integer) | Returns the position of the first occurrence of *string1* in *string2* starting at a given point (not standard SQL)
+| POSITION(substring IN string) | Returns the position of the first occurrence of *substring* in *string*
+| POSITION(substring IN string FROM integer) | Returns the position of the first occurrence of *substring* in *string* starting at a given point (not standard SQL)
 | TRIM( { BOTH &#124; LEADING &#124; TRAILING } string1 FROM string2) | Removes the longest string containing only the characters in *string1* from the start/end/both ends of *string1*
 | OVERLAY(string1 PLACING string2 FROM integer [ FOR integer2 ]) | Replaces a substring of *string1* with *string2*
 | SUBSTRING(string FROM integer)  | Returns a substring of a character string starting at a given point
@@ -1454,9 +1465,12 @@ Algorithms for implicit conversion are subject to change across Calcite releases
 
 #### Explicit Type Conversion
 
-| Operator syntax | Description
-|:--------------- | :----------
-| CAST(value AS type) | Converts a value to a given type.
+| Operator syntax                         | Description
+|:----------------------------------------| :----------
+| CAST(value AS type)                     | Converts a value to a given type
+| CONVERT(string, charSet1, charSet2)     | Converts *string* from *charSet1* to *charSet2*
+| CONVERT(value USING transcodingName)    | Alter *value* from one base character set to *transcodingName*
+| TRANSLATE(value USING transcodingName)  | Alter *value* from one base character set to *transcodingName*
 
 Supported data types syntax:
 
@@ -1542,7 +1556,7 @@ these details follow the table.
 | FROM - TO           | NULL | BOOLEAN | TINYINT | SMALLINT | INT | BIGINT | DECIMAL | FLOAT or REAL | DOUBLE | INTERVAL | DATE | TIME | TIMESTAMP | CHAR or VARCHAR | BINARY or VARBINARY | GEOMETRY | ARRAY |
 |:--------------------|:-----|:--------|:--------|:---------|:----|:-------|:--------|:--------------|:-------|:---------|:-----|:-----|:----------|:----------------|:--------------------|:---------|:------|
 | NULL                | i    | i       | i       | i        | i   | i      | i       | i             | i      | i        | i    | i    | i         | i               | i                   | i        | x     |
-| BOOLEAN             | x    | i       | e       | e        | e   | e      | e       | e             | e      | x        | x    | x    | x         | i               | x                   | x        | x     |
+| BOOLEAN             | x    | i       | x       | x        | x   | x      | x       | x             | x      | x        | x    | x    | x         | i               | x                   | x        | x     |
 | TINYINT             | x    | e       | i       | i        | i   | i      | i       | i             | i      | e        | x    | x    | e         | i               | x                   | x        | x     |
 | SMALLINT            | x    | e       | i       | i        | i   | i      | i       | i             | i      | e        | x    | x    | e         | i               | x                   | x        | x     |
 | INT                 | x    | e       | i       | i        | i   | i      | i       | i             | i      | e        | x    | x    | e         | i               | x                   | x        | x     |
@@ -2214,6 +2228,7 @@ implements the OpenGIS Simple Features Implementation Specification for SQL,
 | o | ST_PointFromWKB(wkt [, srid ]) | Converts WKB → POINT
 | o | ST_PolyFromText(wkt [, srid ]) | Converts WKT → POLYGON
 | o | ST_PolyFromWKB(wkt [, srid ]) | Converts WKB → POLYGON
+| p | ST_ReducePrecision(geom, gridSize) | Reduces the precision of a *geom* to the provided *gridSize*
 | h | ST_ToMultiPoint(geom) | Converts the coordinates of *geom* (which may be a GEOMETRYCOLLECTION) into a MULTIPOINT
 | h | ST_ToMultiLine(geom) | Converts the coordinates of *geom* (which may be a GEOMETRYCOLLECTION) into a MULTILINESTRING
 | h | ST_ToMultiSegments(geom) | Converts *geom* (which may be a GEOMETRYCOLLECTION) into a set of distinct segments stored in a MULTILINESTRING
@@ -2346,11 +2361,13 @@ The following functions combine 2D geometries.
 
 | C | Operator syntax      | Description
 |:- |:-------------------- |:-----------
-| o | ST_Buffer(geom, distance [, quadSegs \| style ]) | Computes a buffer around *geom*
+| p | ST_Buffer(geom, distance [, quadSegs, endCapStyle ]) | Computes a buffer around *geom*
+| p | ST_Buffer(geom, distance [, bufferStyle ]) | Computes a buffer around *geom*
 | o | ST_ConvexHull(geom) | Computes the smallest convex polygon that contains all the points in *geom*
 | o | ST_Difference(geom1, geom2) | Computes the difference between two geometries
 | o | ST_SymDifference(geom1, geom2) | Computes the symmetric difference between two geometries
 | o | ST_Intersection(geom1, geom2) | Computes the intersection of *geom1* and *geom2*
+| p | ST_OffsetCurve(geom, distance, bufferStyle) | Computes an offset line for *linestring*
 | o | ST_Union(geom1, geom2) | Computes the union of *geom1* and *geom2*
 | o | ST_Union(geomCollection) | Computes the union of the geometries in *geomCollection*
 
@@ -2375,27 +2392,33 @@ Not implemented:
 
 The following functions modify 2D geometries.
 
+| C | Operator syntax      | Description
+|:- |:-------------------- |:-----------
+| p | ST_AddPoint(linestring, point [, index]) | Adds *point* to *linestring* at a given *index* (or at the end if *index* is not specified)
+| h | ST_Densify(geom, tolerance) | Densifies a *geom* by inserting extra vertices along the line segments
+| h | ST_FlipCoordinates(geom) | Flips the X and Y coordinates of the *geom*
+| h | ST_Holes(geom) | Returns the holes in the *geom* (which may be a GEOMETRYCOLLECTION)
+| h | ST_Normalize(geom) | Converts the *geom* to normal form
+| p | ST_RemoveRepeatedPoints(geom [, tolerance]) | Removes duplicated coordinates from the *geom*
+| h | ST_RemoveHoles(geom) | Removes the holes of the *geom*
+| p | ST_RemovePoint(linestring, index) | Remove *point* at given *index* in *linestring*
+| h | ST_Reverse(geom) | Reverses the order of the coordinates of the *geom*
+
 Not implemented:
 
-* ST_AddPoint(geom, point [, tolerance ]) Adds *point* to *geom* with a given *tolerance* (default 0)
 * ST_CollectionExtract(geom, dimension) Filters *geom*, returning a multi-geometry of those members with a given *dimension* (1 = point, 2 = line-string, 3 = polygon)
-* ST_Densify(geom, tolerance) Inserts extra vertices every *tolerance* along the line segments of *geom*
-* ST_FlipCoordinates(geom) Flips the X and Y coordinates of *geom*
-* ST_Holes(geom) Returns the holes in *geom* (which may be a GEOMETRYCOLLECTION)
-* ST_Normalize(geom) Converts *geom* to normal form
-* ST_RemoveDuplicatedCoordinates(geom) Removes duplicated coordinates from *geom*
-* ST_RemoveHoles(geom) Removes a *geom*'s holes
-* ST_RemovePoints(geom, poly) Removes all coordinates of *geom* located within *poly*; null if all coordinates are removed
-* ST_RemoveRepeatedPoints(geom, tolerance) Removes from *geom* all repeated points (or points within *tolerance* of another point)
-* ST_Reverse(geom) Reverses the vertex order of *geom*
 
 #### Geometry editing functions (3D)
 
 The following functions modify 3D geometries.
 
+
+| C | Operator syntax      | Description
+|:- |:-------------------- |:-----------
+| h | ST_AddZ(geom, zToAdd) | Adds *zToAdd* to the z-coordinate of *geom*
+
 Not implemented:
 
-* ST_AddZ(geom, zToAdd) Adds *zToAdd* to the z-coordinate of *geom*
 * ST_Interpolate3DLine(geom) Returns *geom* with an interpolation of z values, or null if it is not a line-string or MULTILINESTRING
 * ST_MultiplyZ(geom, zFactor) Returns *geom* with its z-values multiplied by *zFactor*
 * ST_Reverse3DLine(geom [, sortOrder ]) Potentially reverses *geom* according to the z-values of its first and last coordinates
@@ -2441,6 +2464,7 @@ The following functions process geometries.
 | o | ST_Simplify(geom, distance)  | Simplifies *geom* using the [Douglas-Peuker algorithm](https://en.wikipedia.org/wiki/Ramer%E2%80%93Douglas%E2%80%93Peucker_algorithm) with a *distance* tolerance
 | o | ST_SimplifyPreserveTopology(geom, distance) | Simplifies *geom*, preserving its topology
 | o | ST_Snap(geom1, geom2, tolerance) | Snaps *geom1* and *geom2* together
+| p | ST_Split(geom, blade) | Splits *geom* by *blade*
 
 Not implemented:
 
@@ -2449,7 +2473,6 @@ Not implemented:
 * ST_MakeValid(geom [, preserveGeomDim [, preserveDuplicateCoord [, preserveCoordDim]]]) Makes *geom* valid
 * ST_RingSideBuffer(geom, distance, bufferCount [, endCapStyle [, doDifference]]) Computes a ring buffer on one side
 * ST_SideBuffer(geom, distance [, bufferStyle ]) Compute a single buffer on one side
-* ST_Split(geom1, geom2 [, tolerance]) Splits *geom1* by *geom2* using *tolerance* (default 1E-6) to determine where the point splits the line
 
 #### Geometry projection functions
 
@@ -2481,19 +2504,22 @@ Not implemented:
 
 #### Triangulation functions
 
+| C | Operator syntax      | Description
+|:- |:-------------------- |:-----------
+| h | ST_ConstrainedDelaunay(geom [, flag]) | Computes a constrained Delaunay triangulation based on *geom*
+| h | ST_Delaunay(geom [, flag]) | Computes a Delaunay triangulation based on points in *geom*
+
 Not implemented:
 
-* ST_ConstrainedDelaunay(geom [, flag [, quality ]]) Computes a constrained Delaunay triangulation based on *geom*
-* ST_Delaunay(geom [, flag [, quality ]]) Computes a Delaunay triangulation based on points
 * ST_Tessellate(polygon) Tessellates *polygon* (may be MULTIPOLYGON) with adaptive triangles
 
 #### Geometry aggregate functions
 
-Not implemented:
-
-* ST_Accum(geom) Accumulates *geom* into a GEOMETRYCOLLECTION (or MULTIPOINT, MULTILINESTRING or MULTIPOLYGON if possible)
-* ST_Collect(geom) Synonym for `ST_Accum`
-* ST_Union(geom) Computes the union of geometries
+| C | Operator syntax      | Description
+|:- |:-------------------- |:-----------
+| h | ST_Accum(geom) | Accumulates *geom* into an array
+| h | ST_Collect(geom) | Collects *geom* into a GeometryCollection
+| h | ST_Union(geom) | Computes the union of the geometries in *geom*
 
 ### JSON Functions
 
@@ -2596,6 +2622,7 @@ To enable an operator table, set the
 connect string parameter.
 
 The 'C' (compatibility) column contains value:
+* '*' for all libraries,
 * 'b' for Google BigQuery ('fun=bigquery' in the connect string),
 * 'c' for Apache Calcite ('fun=calcite' in the connect string),
 * 'h' for Apache Hive ('fun=hive' in the connect string),
@@ -2623,16 +2650,37 @@ BigQuery's type system uses confusingly different names for types and functions:
 |:- |:-----------------------------------------------|:-----------
 | p | expr :: type                                   | Casts *expr* to *type*
 | m | expr1 <=> expr2                                | Whether two values are equal, treating null values as the same, and it's similar to `IS NOT DISTINCT FROM`
+| * | ACOSH(numeric)                                 | Returns the inverse hyperbolic cosine of *numeric*
+| s | ARRAY(expr [, expr ]*)                         | Construct an array in Apache Spark
+| s | ARRAY_COMPACT(array)                           | Removes null values from the *array*
 | b | ARRAY_CONCAT(array [, array ]*)                | Concatenates one or more arrays. If any input argument is `NULL` the function returns `NULL`
+| s | ARRAY_CONTAINS(array, element)                 | Returns true if the *array* contains the *element*
+| s | ARRAY_DISTINCT(array)                          | Removes duplicate values from the *array* that keeps ordering of elements
+| s | ARRAY_EXCEPT(array1, array2)                   | Returns an array of the elements in *array1* but not in *array2*, without duplicates
+| s | ARRAY_INTERSECT(array1, array2)                | Returns an array of the elements in the intersection of *array1* and *array2*, without duplicates
 | b | ARRAY_LENGTH(array)                            | Synonym for `CARDINALITY`
+| s | ARRAY_MAX(array)                               | Returns the maximum value in the *array*
+| s | ARRAY_MIN(array)                               | Returns the minimum value in the *array*
+| s | ARRAY_REPEAT(element, count)                   | Returns the array containing element count times.
 | b | ARRAY_REVERSE(array)                           | Reverses elements of *array*
+| s | ARRAY_SIZE(array)                              | Synonym for `CARDINALITY`
+| b | ARRAY_TO_STRING(array, delimiter [, nullText ])| Returns a concatenation of the elements in *array* as a STRING and take *delimiter* as the delimiter. If the *nullText* parameter is used, the function replaces any `NULL` values in the array with the value of *nullText*. If the *nullText* parameter is not used, the function omits the `NULL` value and its preceding delimiter
+| s | ARRAY_UNION(array1, array2)                    | Returns an array of the elements in the union of *array1* and *array2*, without duplicates
+| s | SORT_ARRAY(array [, ascendingOrder])           | Sorts the *array* in ascending or descending order according to the natural ordering of the array elements. The default order is ascending if *ascendingOrder* is not specified. Null elements will be placed at the beginning of the returned array in ascending order or at the end of the returned array in descending order
+| * | ASINH(numeric)                                 | Returns the inverse hyperbolic sine of *numeric*
+| * | ATANH(numeric)                                 | Returns the inverse hyperbolic tangent of *numeric*
 | m s | CHAR(integer)                                | Returns the character whose ASCII code is *integer* % 256, or null if *integer* &lt; 0
-| o p | CHR(integer)                                 | Returns the character whose UTF-8 code is *integer*
-| b o | COSH(numeric)                                | Returns the hyperbolic cosine of *numeric*
-| o | CONCAT(string, string)                         | Concatenates two strings
-| b m p | CONCAT(string [, string ]*)                | Concatenates two or more strings
-| m | COMPRESS(string)                               | Compresses a string using zlib compression and returns the result as a binary string.
+| b o p | CHR(integer)                               | Returns the character whose UTF-8 code is *integer*
+| o | CONCAT(string, string)                         | Concatenates two strings, returns null only when both string arguments are null, otherwise treats null as empty string
+| b m | CONCAT(string [, string ]*)                  | Concatenates one or more strings, returns null if any of the arguments is null
+| p q | CONCAT(string [, string ]*)                  | Concatenates one or more strings, null is treated as empty string
+| m | COMPRESS(string)                               | Compresses a string using zlib compression and returns the result as a binary string
+| q | CONVERT(type, expression [ , style ])          | Equivalent to `CAST(expression AS type)`; ignores the *style* operand
 | p | CONVERT_TIMEZONE(tz1, tz2, datetime)           | Converts the timezone of *datetime* from *tz1* to *tz2*
+| * | COSH(numeric)                                  | Returns the hyperbolic cosine of *numeric*
+| * | COTH(numeric)                                  | Returns the hyperbolic cotangent of *numeric*
+| * | CSC(numeric)                                   | Returns the cosecant of *numeric* in radians
+| * | CSCH(numeric)                                  | Returns the hyperbolic cosecant of *numeric*
 | b | CURRENT_DATETIME([ timeZone ])                 | Returns the current time as a TIMESTAMP from *timezone*
 | m | DAYNAME(datetime)                              | Returns the name, in the connection's locale, of the weekday in *datetime*; for example, it returns '星期日' for both DATE '2020-02-10' and TIMESTAMP '2020-02-10 10:10:10'
 | b | DATE(timestamp)                                | Extracts the DATE from a *timestamp*
@@ -2647,43 +2695,65 @@ BigQuery's type system uses confusingly different names for types and functions:
 | b | DATETIME(date)                                 | Converts *date* to a TIMESTAMP value (at midnight)
 | b | DATETIME(date, timeZone)                       | Converts *date* to a TIMESTAMP value (at midnight), in *timeZone*
 | b | DATETIME(year, month, day, hour, minute, second) | Creates a TIMESTAMP for *year*, *month*, *day*, *hour*, *minute*, *second* (all of type INTEGER)
+| b | DATETIME_ADD(timestamp, interval)              | Returns the TIMESTAMP value that occurs *interval* after *timestamp*
+| b | DATETIME_DIFF(timestamp, timestamp2, timeUnit) | Returns the whole number of *timeUnit* between *timestamp* and *timestamp2*
+| b | DATETIME_SUB(timestamp, interval)              | Returns the TIMESTAMP that occurs *interval* before *timestamp*
+| b | DATETIME_TRUNC(timestamp, timeUnit)            | Truncates *timestamp* to the granularity of *timeUnit*, rounding to the beginning of the unit
 | b | DATE_FROM_UNIX_DATE(integer)                   | Returns the DATE that is *integer* days after 1970-01-01
 | p | DATE_PART(timeUnit, datetime)                  | Equivalent to `EXTRACT(timeUnit FROM  datetime)`
+| b | DATE_ADD(date, interval)                       | Returns the DATE value that occurs *interval* after *date*
+| b | DATE_DIFF(date, date2, timeUnit)               | Returns the whole number of *timeUnit* between *date* and *date2*
 | b | DATE_SUB(date, interval)                       | Returns the DATE value that occurs *interval* before *date*
 | b | DATE_TRUNC(date, timeUnit)                     | Truncates *date* to the granularity of *timeUnit*, rounding to the beginning of the unit
 | o | DECODE(value, value1, result1 [, valueN, resultN ]* [, default ]) | Compares *value* to each *valueN* value one by one; if *value* is equal to a *valueN*, returns the corresponding *resultN*, else returns *default*, or NULL if *default* is not specified
 | p | DIFFERENCE(string, string)                     | Returns a measure of the similarity of two strings, namely the number of character positions that their `SOUNDEX` values have in common: 4 if the `SOUNDEX` values are same and 0 if the `SOUNDEX` values are totally different
 | b | ENDS_WITH(string1, string2)                    | Returns whether *string2* is a suffix of *string1*
-| o | EXTRACT(xml, xpath, [, namespaces ])           | Returns the xml fragment of the element or elements matched by the XPath expression. The optional namespace value that specifies a default mapping or namespace mapping for prefixes, which is used when evaluating the XPath expression
+| o | EXTRACT(xml, xpath, [, namespaces ])           | Returns the XML fragment of the element or elements matched by the XPath expression. The optional namespace value that specifies a default mapping or namespace mapping for prefixes, which is used when evaluating the XPath expression
 | o | EXISTSNODE(xml, xpath, [, namespaces ])        | Determines whether traversal of a XML document using a specified xpath results in any nodes. Returns 0 if no nodes remain after applying the XPath traversal on the document fragment of the element or elements matched by the XPath expression. Returns 1 if any nodes remain. The optional namespace value that specifies a default mapping or namespace mapping for prefixes, which is used when evaluating the XPath expression.
 | m | EXTRACTVALUE(xml, xpathExpr))                  | Returns the text of the first text node which is a child of the element or elements matched by the XPath expression.
+| b | FORMAT_DATE(string, date)                      | Formats *date* according to the specified format *string*
+| b | FORMAT_DATETIME(string, timestamp)             | Formats *timestamp* according to the specified format *string*
+| b | FORMAT_TIME(string, time)                      | Formats *time* according to the specified format *string*
+| b | FORMAT_TIMESTAMP(string timestamp)             | Formats *timestamp* according to the specified format *string*
 | b o | GREATEST(expr [, expr ]*)                    | Returns the greatest of the expressions
 | b h s | IF(condition, value1, value2)              | Returns *value1* if *condition* is TRUE, *value2* otherwise
 | b | IFNULL(value1, value2)                         | Equivalent to `NVL(value1, value2)`
+| b o | INSTR(string, substring [, from [, occurrence ] ]) | Returns the position of *substring* in *string*, searching starting at *from* (default 1), and until locating the nth *occurrence* (default 1) of *substring*
+| m | INSTR(string, substring)                       | Equivalent to `POSITION(substring IN string)`
 | p | string1 ILIKE string2 [ ESCAPE string3 ]       | Whether *string1* matches pattern *string2*, ignoring case (similar to `LIKE`)
 | p | string1 NOT ILIKE string2 [ ESCAPE string3 ]   | Whether *string1* does not match pattern *string2*, ignoring case (similar to `NOT LIKE`)
 | m | JSON_TYPE(jsonValue)                           | Returns a string value indicating the type of *jsonValue*
 | m | JSON_DEPTH(jsonValue)                          | Returns an integer value indicating the depth of *jsonValue*
 | m | JSON_PRETTY(jsonValue)                         | Returns a pretty-printing of *jsonValue*
 | m | JSON_LENGTH(jsonValue [, path ])               | Returns a integer indicating the length of *jsonValue*
-| m | JSON_INSERT(jsonValue, path, val[, path, val]*)  | Returns a JSON document insert a data of *jsonValue*, *path*, *val*
+| m | JSON_INSERT(jsonValue, path, val [, path, val ]*) | Returns a JSON document insert a data of *jsonValue*, *path*, *val*
 | m | JSON_KEYS(jsonValue [, path ])                 | Returns a string indicating the keys of a JSON *jsonValue*
-| m | JSON_REMOVE(jsonValue, path[, path])           | Removes data from *jsonValue* using a series of *path* expressions and returns the result
+| m | JSON_REMOVE(jsonValue, path [, path ])         | Removes data from *jsonValue* using a series of *path* expressions and returns the result
 | m | JSON_REPLACE(jsonValue, path, val[, path, val]*)  | Returns a JSON document replace a data of *jsonValue*, *path*, *val*
 | m | JSON_SET(jsonValue, path, val[, path, val]*)  | Returns a JSON document set a data of *jsonValue*, *path*, *val*
 | m | JSON_STORAGE_SIZE(jsonValue)                   | Returns the number of bytes used to store the binary representation of *jsonValue*
 | b o | LEAST(expr [, expr ]* )                      | Returns the least of the expressions
 | b m p | LEFT(string, length)                       | Returns the leftmost *length* characters from the *string*
 | b | LENGTH(string)                                 | Equivalent to `CHAR_LENGTH(string)`
-| b o | LPAD(string, length[, pattern ])             | Returns a string or bytes value that consists of *string* prepended to *length* with *pattern*
+| b | LOG(numeric1 [, numeric2 ])                    | Returns the logarithm of *numeric1* to base *numeric2*, or base e if *numeric2* is not present
+| b o | LPAD(string, length [, pattern ])            | Returns a string or bytes value that consists of *string* prepended to *length* with *pattern*
 | m | TO_BASE64(string)                              | Converts the *string* to base-64 encoded form and returns a encoded string
 | b m | FROM_BASE64(string)                          | Returns the decoded result of a base-64 *string* as a string
 | b o | LTRIM(string)                                | Returns *string* with all blanks removed from the start
+| s | MAP_ENTRIES(map)                               | Returns the entries of the *map* as an array, the order of the entries is not defined
+| s | MAP_KEYS(map)                                  | Returns the keys of the *map* as an array, the order of the entries is not defined
+| s | MAP_VALUES(map)                                | Returns the values of the *map* as an array, the order of the entries is not defined
 | b m p | MD5(string)                                | Calculates an MD5 128-bit checksum of *string* and returns it as a hex string
 | m | MONTHNAME(date)                                | Returns the name, in the connection's locale, of the month in *datetime*; for example, it returns '二月' for both DATE '2020-02-10' and TIMESTAMP '2020-02-10 10:10:10'
 | o | NVL(value1, value2)                            | Returns *value1* if *value1* is not null, otherwise *value2*
+| b | OFFSET(index)                                  | When indexing an array, wrapping *index* in `OFFSET` returns the value at the 0-based *index*; throws error if *index* is out of bounds
+| b | ORDINAL(index)                                 | Similar to `OFFSET` except *index* begins at 1
+| b | PARSE_DATE(format, string)                     | Uses format specified by *format* to convert *string* representation of date to a DATE value
+| b | PARSE_DATETIME(format, string)                 | Uses format specified by *format* to convert *string* representation of datetime to a TIMESTAMP value
+| b | PARSE_TIME(format, string)                     | Uses format specified by *format* to convert *string* representation of time to a TIME value
+| b | PARSE_TIMESTAMP(format, string[, timeZone])    | Uses format specified by *format* to convert *string* representation of timestamp to a TIMESTAMP WITH LOCAL TIME ZONE value in *timeZone*
 | b | POW(numeric1, numeric2)                        | Returns *numeric1* raised to the power *numeric2*
-| m o | REGEXP_REPLACE(string, regexp, rep, [, pos [, occurrence [, matchType]]]) | Replaces all substrings of *string* that match *regexp* with *rep* at the starting *pos* in expr (if omitted, the default is 1), *occurrence* means which occurrence of a match to search for (if omitted, the default is 1), *matchType* specifies how to perform matching
+| m o | REGEXP_REPLACE(string, regexp, rep [, pos [, occurrence [, matchType]]]) | Replaces all substrings of *string* that match *regexp* with *rep* at the starting *pos* in expr (if omitted, the default is 1), *occurrence* means which occurrence of a match to search for (if omitted, the default is 1), *matchType* specifies how to perform matching
 | b m p | REPEAT(string, integer)                    | Returns a string consisting of *string* repeated of *integer* times; returns an empty string if *integer* is less than 1
 | b m | REVERSE(string)                              | Returns *string* with the order of the characters reversed
 | b m p | RIGHT(string, length)                      | Returns the rightmost *length* characters from the *string*
@@ -2691,14 +2761,23 @@ BigQuery's type system uses confusingly different names for types and functions:
 | h s | string1 NOT RLIKE string2                    | Whether *string1* does not match regex pattern *string2* (similar to `NOT LIKE`, but uses Java regex)
 | b o | RPAD(string, length[, pattern ])             | Returns a string or bytes value that consists of *string* appended to *length* with *pattern*
 | b o | RTRIM(string)                                | Returns *string* with all blanks removed from the end
+| b | SAFE_CAST(value AS type)                       | Converts *value* to *type*, returning NULL if conversion fails
+| b | SAFE_OFFSET(index)                             | Similar to `OFFSET` except null is returned if *index* is out of bounds
+| b | SAFE_ORDINAL(index)                            | Similar to `OFFSET` except *index* begins at 1 and null is returned if *index* is out of bounds
+| * | SEC(numeric)                                   | Returns the secant of *numeric* in radians
+| * | SECH(numeric)                                  | Returns the hyperbolic secant of *numeric*
 | b m p | SHA1(string)                               | Calculates a SHA-1 hash value of *string* and returns it as a hex string
-| b o | SINH(numeric)                                | Returns the hyperbolic sine of *numeric*
+| b p | SHA256(string)                               | Calculates a SHA-256 hash value of *string* and returns it as a hex string
+| b p | SHA512(string)                               | Calculates a SHA-512 hash value of *string* and returns it as a hex string
+| * | SINH(numeric)                                  | Returns the hyperbolic sine of *numeric*
 | b m o p | SOUNDEX(string)                          | Returns the phonetic representation of *string*; throws if *string* is encoded with multi-byte encoding such as UTF-8
 | m | SPACE(integer)                                 | Returns a string of *integer* spaces; returns an empty string if *integer* is less than 1
+| b | SPLIT(string [, delimiter ])                   | Returns the string array of *string* split at *delimiter* (if omitted, default is comma)
 | b | STARTS_WITH(string1, string2)                  | Returns whether *string2* is a prefix of *string1*
 | m | STRCMP(string, string)                         | Returns 0 if both of the strings are same and returns -1 when the first argument is smaller than the second and 1 when the second one is smaller than the first one
+| b p | STRPOS(string, substring)                    | Equivalent to `POSITION(substring IN string)`
 | b m o p | SUBSTR(string, position [, substringLength ]) | Returns a portion of *string*, beginning at character *position*, *substringLength* characters long. SUBSTR calculates lengths using characters as defined by the input character set
-| b o | TANH(numeric)                                | Returns the hyperbolic tangent of *numeric*
+| * | TANH(numeric)                                  | Returns the hyperbolic tangent of *numeric*
 | b | TIME(hour, minute, second)                     | Returns a TIME value *hour*, *minute*, *second* (all of type INTEGER)
 | b | TIME(timestamp)                                | Extracts the TIME from *timestamp* (a local time; BigQuery's DATETIME type)
 | b | TIME(instant)                                  | Extracts the TIME from *timestampLtz* (an instant; BigQuery's TIMESTAMP type), assuming UTC
@@ -2720,10 +2799,12 @@ BigQuery's type system uses confusingly different names for types and functions:
 | b | TIME_DIFF(time, time2, timeUnit)               | Returns the whole number of *timeUnit* between *time* and *time2*
 | b | TIME_SUB(time, interval)                       | Returns the TIME value that is *interval* before *time*
 | b | TIME_TRUNC(time, timeUnit)                     | Truncates *time* to the granularity of *timeUnit*, rounding to the beginning of the unit
+| m o p | TO_CHAR(timestamp, format)                 | Converts *timestamp* to a string using the format *format*
 | o p | TO_DATE(string, format)                      | Converts *string* to a date using the format *format*
 | o p | TO_TIMESTAMP(string, format)                 | Converts *string* to a timestamp using the format *format*
 | b o p | TRANSLATE(expr, fromString, toString)      | Returns *expr* with all occurrences of each character in *fromString* replaced by its corresponding character in *toString*. Characters in *expr* that are not in *fromString* are not replaced
 | b | TRUNC(numeric1 [, numeric2 ])                  | Truncates *numeric1* to optionally *numeric2* (if not specified 0) places right to the decimal point
+| q | TRY_CAST(value AS type)                        | Converts *value* to *type*, returning NULL if conversion fails
 | b | UNIX_MICROS(timestamp)                         | Returns the number of microseconds since 1970-01-01 00:00:00
 | b | UNIX_MILLIS(timestamp)                         | Returns the number of milliseconds since 1970-01-01 00:00:00
 | b | UNIX_SECONDS(timestamp)                        | Returns the number of seconds since 1970-01-01 00:00:00
@@ -2773,6 +2854,8 @@ Dialect-specific aggregate functions.
 | b | LOGICAL_OR(condition)                          | Synonym for `SOME`
 | s | MAX_BY(value, comp)                            | Synonym for `ARG_MAX`
 | s | MIN_BY(value, comp)                            | Synonym for `ARG_MIN`
+| b | PERCENTILE_CONT(value, fraction [ RESPECT NULLS &#124; IGNORE NULLS ] ) OVER windowSpec | Synonym for standard `PERCENTILE_CONT` where `PERCENTILE_CONT(value, fraction) OVER (ORDER BY value)` is equivalent to standard `PERCENTILE_CONT(fraction) WITHIN GROUP (ORDER BY value)`
+| b | PERCENTILE_DISC(value, fraction [ RESPECT NULLS &#124; IGNORE NULLS ] ) OVER windowSpec | Synonym for standard `PERCENTILE_DISC` where `PERCENTILE_DISC(value, fraction) OVER (ORDER BY value)` is equivalent to standard `PERCENTILE_DISC(fraction) WITHIN GROUP (ORDER BY value)`
 | b p | STRING_AGG( [ ALL &#124; DISTINCT ] value [, separator] [ ORDER BY orderItem [, orderItem ]* ] ) | Synonym for `LISTAGG`
 
 Usage Examples:

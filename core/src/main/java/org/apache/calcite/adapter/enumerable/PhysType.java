@@ -16,6 +16,7 @@
  */
 package org.apache.calcite.adapter.enumerable;
 
+import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.linq4j.tree.Expression;
 import org.apache.calcite.linq4j.tree.ParameterExpression;
 import org.apache.calcite.rel.RelCollation;
@@ -35,7 +36,7 @@ import java.util.List;
  * type of the row (returned by {@link #getJavaRowType()}), and methods to
  * generate expressions to access fields, generate records, and so forth.
  * Together, the records encapsulate how the logical type maps onto the physical
- * type.</p>
+ * type.
  */
 public interface PhysType {
   /** Returns the Java type (often a Class) that represents a row. For
@@ -47,8 +48,11 @@ public interface PhysType {
    * ordinal.
    *
    * <p>For instance, when the java row type is {@code Object[]}, the java
-   * field type is {@code Object} even if the field is not nullable.</p> */
+   * field type is {@code Object} even if the field is not nullable. */
   Type getJavaFieldType(int field);
+
+  /** Returns the type factory. */
+  JavaTypeFactory getTypeFactory();
 
   /** Returns the physical type of a field. */
   PhysType field(int ordinal);
