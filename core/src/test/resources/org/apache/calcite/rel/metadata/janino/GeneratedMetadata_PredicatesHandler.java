@@ -78,6 +78,8 @@ public final class GeneratedMetadata_PredicatesHandler
       return provider0.getPredicates((org.apache.calcite.rel.core.Minus) r, mq);
     } else if (r instanceof org.apache.calcite.rel.core.Project) {
       return provider0.getPredicates((org.apache.calcite.rel.core.Project) r, mq);
+    } else if (r instanceof org.apache.calcite.rel.core.Sample) {
+      return provider0.getPredicates((org.apache.calcite.rel.core.Sample) r, mq);
     } else if (r instanceof org.apache.calcite.rel.core.Sort) {
       return provider0.getPredicates((org.apache.calcite.rel.core.Sort) r, mq);
     } else if (r instanceof org.apache.calcite.rel.core.TableModify) {
@@ -86,6 +88,8 @@ public final class GeneratedMetadata_PredicatesHandler
       return provider0.getPredicates((org.apache.calcite.rel.core.TableScan) r, mq);
     } else if (r instanceof org.apache.calcite.rel.core.Union) {
       return provider0.getPredicates((org.apache.calcite.rel.core.Union) r, mq);
+    } else if (r instanceof org.apache.calcite.rel.core.Values) {
+      return provider0.getPredicates((org.apache.calcite.rel.core.Values) r, mq);
     } else if (r instanceof org.apache.calcite.rel.RelNode) {
       return provider0.getPredicates((org.apache.calcite.rel.RelNode) r, mq);
     } else {

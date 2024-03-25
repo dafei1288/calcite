@@ -98,7 +98,7 @@ public class AggregateStarTableRule
     final Optional<CalciteConnectionConfig> config =
         planner.getContext().maybeUnwrap(CalciteConnectionConfig.class);
     if (!(config.isPresent() && config.get().createMaterializations())) {
-      // Disable this rule if we if materializations are disabled - in
+      // Disable this rule if materializations are disabled - in
       // particular, if we are in a recursive statement that is being used to
       // populate a materialization
       return;
@@ -119,7 +119,7 @@ public class AggregateStarTableRule
     final CalciteSchema.TableEntry tableEntry = pair.left;
     final TileKey tileKey = pair.right;
     final RelMetadataQuery mq = call.getMetadataQuery();
-    final double rowCount = aggregate.estimateRowCount(mq);
+    final double rowCount = mq.getRowCount(aggregate);
     final Table aggregateTable = tableEntry.getTable();
     final RelDataType aggregateTableRowType =
         aggregateTable.getRowType(cluster.getTypeFactory());

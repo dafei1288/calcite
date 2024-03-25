@@ -24,6 +24,7 @@ import org.apache.calcite.sql.fun.SqlLibrary;
 import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
 import org.apache.calcite.sql.parser.SqlParserFixture;
 import org.apache.calcite.sql.parser.babel.SqlBabelParserImpl;
+import org.apache.calcite.sql.validate.SqlConformanceEnum;
 
 import org.junit.jupiter.api.Test;
 
@@ -229,6 +230,43 @@ class BabelTest {
     checkSqlResult("mysql",
         "SELECT NOT x <=> 1 FROM (VALUES (1, 2)) as tbl(x,y)",
         "EXPR$0=false\n");
+  }
+
+  /** Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6030">
+   * [CALCITE-6030] DATE_PART is not handled by the RexToLixTranslator</a>. */
+  @Test void testDatePart() {
+    checkSqlResult("postgresql", "SELECT DATE_PART(second, TIME '10:10:10')",
+        "EXPR$0=10\n");
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-5816">[CALCITE-5816]
+   * Query with LEFT SEMI JOIN should not refer to RHS columns</a>. */
+  @Test public void testLeftSemiJoin() {
+    final SqlValidatorFixture v = Fixtures.forValidator()
+        .withParserConfig(c -> c.withParserFactory(SqlBabelParserImpl.FACTORY))
+        .withConformance(SqlConformanceEnum.BABEL);
+
+    v.withSql("SELECT * FROM dept LEFT SEMI JOIN emp ON emp.deptno = dept.deptno")
+        .type("RecordType(INTEGER NOT NULL DEPTNO, VARCHAR(10) NOT NULL NAME) NOT NULL");
+
+    v.withSql("SELECT deptno FROM dept LEFT SEMI JOIN emp ON emp.deptno = dept.deptno")
+        .type("RecordType(INTEGER NOT NULL DEPTNO) NOT NULL");
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-5962">[CALCITE-5962]
+   * Support parse Spark-style syntax "LEFT ANTI JOIN" in Babel parser</a>. */
+  @Test public void testLeftAntiJoin() {
+    final SqlValidatorFixture v = Fixtures.forValidator()
+        .withParserConfig(c -> c.withParserFactory(SqlBabelParserImpl.FACTORY))
+        .withConformance(SqlConformanceEnum.BABEL);
+
+    v.withSql("SELECT * FROM dept LEFT ANTI JOIN emp ON emp.deptno = dept.deptno")
+        .type("RecordType(INTEGER NOT NULL DEPTNO, VARCHAR(10) NOT NULL NAME) NOT NULL");
+
+    v.withSql("SELECT name FROM dept LEFT ANTI JOIN emp ON emp.deptno = dept.deptno")
+        .type("RecordType(VARCHAR(10) NOT NULL NAME) NOT NULL");
   }
 
   private void checkSqlResult(String funLibrary, String query, String result) {

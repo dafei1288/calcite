@@ -98,6 +98,27 @@ order by 1;
 
 !ok
 
+# [CALCITE-5931] Allow integers like 1.00 in window frame
+select empno,
+  stddev(comm) over (order by empno rows 2 preceding) as stdev_2int,
+  stddev(comm) over (order by empno rows 2.00 preceding) as stdev_2double
+from emp
+where deptno = 30
+order by 1;
++-------+-------------------------------------------------+-------------------------------------------------+
+| EMPNO | STDEV_2INT                                      | STDEV_2DOUBLE                                   |
++-------+-------------------------------------------------+-------------------------------------------------+
+|  7499 |                                                 |                                                 |
+|  7521 |  141.421356237309510106570087373256683349609375 |  141.421356237309510106570087373256683349609375 |
+|  7654 | 585.9465277082316561063635163009166717529296875 | 585.9465277082316561063635163009166717529296875 |
+|  7698 | 636.3961030678927954795653931796550750732421875 | 636.3961030678927954795653931796550750732421875 |
+|  7844 |  989.949493661166570745990611612796783447265625 |  989.949493661166570745990611612796783447265625 |
+|  7900 |                                                 |                                                 |
++-------+-------------------------------------------------+-------------------------------------------------+
+(6 rows)
+
+!ok
+
 !use post
 # [CALCITE-1540] Support multiple columns in PARTITION BY clause of window function
 select gender,deptno,
@@ -776,6 +797,47 @@ from emp;
 | M      | Bob   | Adam  |
 +--------+-------+-------+
 (9 rows)
+
+!ok
+
+# [CALCITE-6011] Add the planner rule that pushes the Filter past a Window
+# Get the initial result which not push filter past window.
+select gender, count(*) over(partition by gender order by ename) as count1 from emp;
++--------+--------+
+| GENDER | COUNT1 |
++--------+--------+
+| F      |      1 |
+| F      |      2 |
+| F      |      3 |
+| F      |      4 |
+| F      |      5 |
+| F      |      6 |
+| M      |      1 |
+| M      |      2 |
+| M      |      3 |
++--------+--------+
+(9 rows)
+
+!ok
+
+# Get the plan and result which push filter past window
+select gender, count(*) over(partition by gender order by ename) as count1 from emp where gender = 'F';
+EnumerableCalc(expr#0..3=[{inputs}], GENDER=[$t2], $1=[$t3])
+  EnumerableWindow(window#0=[window(partition {2} order by [0] aggs [COUNT()])])
+    EnumerableCalc(expr#0..2=[{inputs}], expr#3=['F'], expr#4=[=($t2, $t3)], proj#0..2=[{exprs}], $condition=[$t4])
+      EnumerableValues(tuples=[[{ 'Jane', 10, 'F' }, { 'Bob', 10, 'M' }, { 'Eric', 20, 'M' }, { 'Susan', 30, 'F' }, { 'Alice', 30, 'F' }, { 'Adam', 50, 'M' }, { 'Eve', 50, 'F' }, { 'Grace', 60, 'F' }, { 'Wilma', null, 'F' }]])
+!plan
++--------+--------+
+| GENDER | COUNT1 |
++--------+--------+
+| F      |      1 |
+| F      |      2 |
+| F      |      3 |
+| F      |      4 |
+| F      |      5 |
+| F      |      6 |
++--------+--------+
+(6 rows)
 
 !ok
 # End winagg.iq

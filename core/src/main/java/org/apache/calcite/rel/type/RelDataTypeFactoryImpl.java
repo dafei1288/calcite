@@ -27,6 +27,7 @@ import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeMappingRule;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
+import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
 import com.google.common.cache.CacheBuilder;
@@ -40,7 +41,6 @@ import com.google.common.collect.Interners;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.nio.charset.Charset;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -51,6 +51,8 @@ import java.util.Map;
 import java.util.Objects;
 
 import static com.google.common.base.Preconditions.checkArgument;
+
+import static org.apache.calcite.util.ReflectUtil.isStatic;
 
 import static java.util.Objects.requireNonNull;
 
@@ -196,26 +198,10 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
   }
 
   private RelDataType createStructType(
-      final List<? extends Map.Entry<String, RelDataType>> fieldList, boolean nullable) {
-    return canonize(StructKind.FULLY_QUALIFIED,
-        new AbstractList<String>() {
-          @Override public String get(int index) {
-            return fieldList.get(index).getKey();
-          }
-
-          @Override public int size() {
-            return fieldList.size();
-          }
-        },
-        new AbstractList<RelDataType>() {
-          @Override public RelDataType get(int index) {
-            return fieldList.get(index).getValue();
-          }
-
-          @Override public int size() {
-            return fieldList.size();
-          }
-        }, nullable);
+      final List<? extends Map.Entry<String, RelDataType>> fieldList,
+      boolean nullable) {
+    return canonize(StructKind.FULLY_QUALIFIED, Pair.left(fieldList),
+        Pair.right(fieldList), nullable);
   }
 
   @Override public @Nullable RelDataType leastRestrictive(
@@ -276,7 +262,7 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       final List<RelDataType> types, SqlTypeName sqlTypeName) {
     assert sqlTypeName == SqlTypeName.ARRAY || sqlTypeName == SqlTypeName.MULTISET;
     boolean isNullable = false;
-    for (RelDataType type: types) {
+    for (RelDataType type : types) {
       if (type.getComponentType() == null) {
         return null;
       }
@@ -300,7 +286,7 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       final List<RelDataType> types, SqlTypeName sqlTypeName) {
     assert sqlTypeName == SqlTypeName.MAP;
     boolean isNullable = false;
-    for (RelDataType type: types) {
+    for (RelDataType type : types) {
       if (!(type instanceof MapSqlType)) {
         return null;
       }
@@ -524,7 +510,7 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
   private @Nullable List<RelDataTypeFieldImpl> fieldsOf(Class clazz) {
     final List<RelDataTypeFieldImpl> list = new ArrayList<>();
     for (Field field : clazz.getFields()) {
-      if (Modifier.isStatic(field.getModifiers())) {
+      if (isStatic(field)) {
         continue;
       }
       list.add(
@@ -604,8 +590,7 @@ public abstract class RelDataTypeFactoryImpl implements RelDataTypeFactory {
       return createSqlType(SqlTypeName.DECIMAL, 38, 0);
     case REAL:
       return createSqlType(SqlTypeName.DECIMAL, 14, 7);
-    case FLOAT:
-      return createSqlType(SqlTypeName.DECIMAL, 14, 7);
+    case FLOAT: // sic
     case DOUBLE:
       // the default max precision is 19, so this is actually DECIMAL(19, 15)
       // but derived system can override the max precision/scale.

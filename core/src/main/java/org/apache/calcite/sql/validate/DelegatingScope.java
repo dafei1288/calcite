@@ -25,6 +25,7 @@ import org.apache.calcite.schema.CustomColumnResolvingTable;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlLambda;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlSelect;
@@ -34,7 +35,6 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Preconditions;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 
@@ -48,6 +48,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 import static org.apache.calcite.util.Static.RESOURCE;
 
@@ -72,9 +74,9 @@ public abstract class DelegatingScope implements SqlValidatorScope {
 
   /** Computes and stores information that cannot be computed on construction,
    * but only after sub-queries have been validated. */
-  @SuppressWarnings({"methodref.receiver.bound.invalid", "FunctionalExpressionCanBeFolded"})
+  @SuppressWarnings({"methodref.receiver.bound.invalid"})
   public final Supplier<AggregatingSelectScope.Resolved> resolved =
-      Suppliers.memoize(this::resolve)::get;
+      Suppliers.memoize(this::resolve);
 
   /** Use while resolving. */
   SqlValidatorUtil.@Nullable GroupAnalyzer groupAnalyzer;
@@ -233,6 +235,8 @@ public abstract class DelegatingScope implements SqlValidatorScope {
   @Override public SqlValidatorScope getOperandScope(SqlCall call) {
     if (call instanceof SqlSelect) {
       return validator.getSelectScope((SqlSelect) call);
+    } else if (call instanceof SqlLambda) {
+      return validator.getLambdaScope((SqlLambda) call);
     }
     return this;
   }
@@ -602,8 +606,7 @@ public abstract class DelegatingScope implements SqlValidatorScope {
   }
 
   private AggregatingSelectScope.Resolved resolve() {
-    Preconditions.checkArgument(groupAnalyzer == null,
-        "resolve already in progress");
+    checkArgument(groupAnalyzer == null, "resolve already in progress");
     SqlValidatorUtil.GroupAnalyzer groupAnalyzer = new SqlValidatorUtil.GroupAnalyzer();
     this.groupAnalyzer = groupAnalyzer;
     try {

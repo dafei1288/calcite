@@ -184,7 +184,7 @@ public class MysqlSqlDialect extends SqlDialect {
     return super.getCastSpec(type);
   }
 
-  @Override public SqlNode rewriteSingleValueExpr(SqlNode aggCall) {
+  @Override public SqlNode rewriteSingleValueExpr(SqlNode aggCall, RelDataType relDataType) {
     final SqlNode operand = ((SqlBasicCall) aggCall).operand(0);
     final SqlLiteral nullLiteral = SqlLiteral.createNull(SqlParserPos.ZERO);
     final SqlNode unionOperand =
@@ -350,6 +350,9 @@ public class MysqlSqlDialect extends SqlDialect {
     writer.endList(frame);
   }
 
+  @Override public boolean supportsAggregateFunctionFilter() {
+    return false;
+  }
 
   @Override public void unparseSqlIntervalQualifier(SqlWriter writer,
       SqlIntervalQualifier qualifier, RelDataTypeSystem typeSystem) {

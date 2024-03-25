@@ -39,6 +39,8 @@ import org.apache.calcite.rex.RexCorrelVariable;
 import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLambda;
+import org.apache.calcite.rex.RexLambdaRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexLocalRef;
 import org.apache.calcite.rex.RexNode;
@@ -57,6 +59,7 @@ import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlWindowTableFunction;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeFamily;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.util.BuiltInMethod;
@@ -290,7 +293,7 @@ public class RexToLixTranslator implements RexVisitor<RexToLixTranslator.Result>
     Expression convert = getConvertExpression(sourceType, targetType, operand);
     Expression convert2 = checkExpressionPadTruncate(convert, sourceType, targetType);
     Expression convert3 = expressionHandlingSafe(convert2, safe);
-    return scaleIntervalToNumber(sourceType, targetType, convert3);
+    return scaleValue(sourceType, targetType, convert3);
   }
 
   private Expression getConvertExpression(
@@ -531,6 +534,19 @@ public class RexToLixTranslator implements RexVisitor<RexToLixTranslator.Result>
       default:
         return defaultExpression.get();
       }
+
+    case BIGINT:
+    case INTEGER:
+    case TINYINT:
+    case SMALLINT: {
+      if (SqlTypeName.NUMERIC_TYPES.contains(sourceType.getSqlTypeName())) {
+        return Expressions.call(
+            BuiltInMethod.INTEGER_CAST.method,
+            Expressions.constant(Primitive.of(typeFactory.getJavaClass(targetType))),
+            operand);
+      }
+      return defaultExpression.get();
+    }
 
     default:
       return defaultExpression.get();
@@ -969,38 +985,23 @@ public class RexToLixTranslator implements RexVisitor<RexToLixTranslator.Result>
     return root;
   }
 
-  private static Expression scaleIntervalToNumber(
+  /** If an expression is a {@code NUMERIC} derived from an {@code INTERVAL},
+   * scales it appropriately; returns the operand unchanged if the conversion
+   * is not from {@code INTERVAL} to {@code NUMERIC}. */
+  private static Expression scaleValue(
       RelDataType sourceType,
       RelDataType targetType,
       Expression operand) {
-    switch (requireNonNull(targetType.getSqlTypeName().getFamily(),
-        () -> "SqlTypeFamily for " + targetType)) {
-    case NUMERIC:
-      switch (sourceType.getSqlTypeName()) {
-      case INTERVAL_YEAR:
-      case INTERVAL_YEAR_MONTH:
-      case INTERVAL_MONTH:
-      case INTERVAL_DAY:
-      case INTERVAL_DAY_HOUR:
-      case INTERVAL_DAY_MINUTE:
-      case INTERVAL_DAY_SECOND:
-      case INTERVAL_HOUR:
-      case INTERVAL_HOUR_MINUTE:
-      case INTERVAL_HOUR_SECOND:
-      case INTERVAL_MINUTE:
-      case INTERVAL_MINUTE_SECOND:
-      case INTERVAL_SECOND:
-        // Scale to the given field.
-        final BigDecimal multiplier = BigDecimal.ONE;
-        final BigDecimal divider =
-            sourceType.getSqlTypeName().getEndUnit().multiplier;
-        return RexImpTable.multiplyDivide(operand, multiplier, divider);
-      default:
-        break;
-      }
-      break;
-    default:
-      break;
+    final SqlTypeFamily targetFamily = targetType.getSqlTypeName().getFamily();
+    final SqlTypeFamily sourceFamily = sourceType.getSqlTypeName().getFamily();
+    if (targetFamily == SqlTypeFamily.NUMERIC
+        && (sourceFamily == SqlTypeFamily.INTERVAL_YEAR_MONTH
+            || sourceFamily == SqlTypeFamily.INTERVAL_DAY_TIME)) {
+      // Scale to the given field.
+      final BigDecimal multiplier = BigDecimal.ONE;
+      final BigDecimal divider =
+          sourceType.getSqlTypeName().getEndUnit().multiplier;
+      return RexImpTable.multiplyDivide(operand, multiplier, divider);
     }
     return operand;
   }
@@ -1009,13 +1010,15 @@ public class RexToLixTranslator implements RexVisitor<RexToLixTranslator.Result>
    * Visit {@code RexInputRef}. If it has never been visited
    * under current storage type before, {@code RexToLixTranslator}
    * generally produces three lines of code.
-   * For example, when visiting a column (named commission) in
+   *
+   * <p>For example, when visiting a column (named commission) in
    * table Employee, the generated code snippet is:
-   * {@code
-   *   final Employee current =(Employee) inputEnumerator.current();
-       final Integer input_value = current.commission;
-       final boolean input_isNull = input_value == null;
-   * }
+   *
+   * <blockquote><pre>{@code
+   * final Employee current = (Employee) inputEnumerator.current();
+   * final Integer input_value = current.commission;
+   * final boolean input_isNull = input_value == null;
+   * }</pre></blockquote>
    */
   @Override public Result visitInputRef(RexInputRef inputRef) {
     final Pair<RexNode, @Nullable Type> key = Pair.of(inputRef, currentStorageType);
@@ -1053,6 +1056,21 @@ public class RexToLixTranslator implements RexVisitor<RexToLixTranslator.Result>
     if (!(inputGetter instanceof EnumerableMatch.PrevInputGetter)) {
       rexWithStorageTypeResultMap.put(key, result);
     }
+    return new Result(isNullVariable, valueVariable);
+  }
+
+  @Override public Result visitLambdaRef(RexLambdaRef ref) {
+    final ParameterExpression valueVariable =
+        Expressions.parameter(
+            typeFactory.getJavaClass(ref.getType()), ref.getName());
+
+    // Generate one line of code to check whether lambdaRef is null, e.g.,
+    // "final boolean input_isNull = $0 == null;"
+    final Expression isNullExpression = checkNull(valueVariable);
+    final ParameterExpression isNullVariable =
+        Expressions.parameter(
+            Boolean.TYPE, list.newName("input_isNull"));
+    list.add(Expressions.declare(Modifier.FINAL, isNullVariable, isNullExpression));
     return new Result(isNullVariable, valueVariable);
   }
 
@@ -1447,6 +1465,42 @@ public class RexToLixTranslator implements RexVisitor<RexToLixTranslator.Result>
 
   @Override public Result visitPatternFieldRef(RexPatternFieldRef fieldRef) {
     return visitInputRef(fieldRef);
+  }
+
+  @Override public Result visitLambda(RexLambda lambda) {
+    final RexNode expression = lambda.getExpression();
+    final List<RexLambdaRef> rexLambdaRefs = lambda.getParameters();
+
+    // Prepare parameter expressions for lambda expression
+    final ParameterExpression[] parameterExpressions =
+        new ParameterExpression[rexLambdaRefs.size()];
+    for (int i = 0; i < rexLambdaRefs.size(); i++) {
+      final RexLambdaRef rexLambdaRef = rexLambdaRefs.get(i);
+      parameterExpressions[i] =
+          Expressions.parameter(
+              typeFactory.getJavaClass(rexLambdaRef.getType()), rexLambdaRef.getName());
+    }
+
+    // Generate code for lambda expression body
+    final RexToLixTranslator exprTranslator = this.setBlock(new BlockBuilder());
+    final Result exprResult = expression.accept(exprTranslator);
+    exprTranslator.list.add(
+        Expressions.return_(null, exprResult.valueVariable));
+
+    // Generate code for lambda expression
+    final Expression functionExpression =
+        Expressions.lambda(exprTranslator.list.toBlock(), parameterExpressions);
+    final ParameterExpression valueVariable =
+        Expressions.parameter(functionExpression.getType(), list.newName("function_value"));
+    list.add(Expressions.declare(Modifier.FINAL, valueVariable, functionExpression));
+
+    // Generate code for checking whether lambda expression is null
+    final Expression isNullExpression = checkNull(valueVariable);
+    final ParameterExpression isNullVariable =
+        Expressions.parameter(Boolean.TYPE, list.newName("function_isNull"));
+    list.add(Expressions.declare(Modifier.FINAL, isNullVariable, isNullExpression));
+
+    return new Result(isNullVariable, valueVariable);
   }
 
   Expression checkNull(Expression expr) {

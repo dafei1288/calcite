@@ -108,11 +108,6 @@ public class BigQuerySqlDialect extends SqlDialect {
         || RESERVED_KEYWORDS.contains(val.toUpperCase(Locale.ROOT));
   }
 
-  @Override public @Nullable SqlNode emulateNullDirection(SqlNode node,
-      boolean nullsFirst, boolean desc) {
-    return emulateNullDirectionWithIsNull(node, nullsFirst, desc);
-  }
-
   @Override public boolean supportsImplicitTypeCoercion(RexCall call) {
     return super.supportsImplicitTypeCoercion(call)
             && RexUtil.isLiteral(call.getOperands().get(0), false)
@@ -213,6 +208,11 @@ public class BigQuerySqlDialect extends SqlDialect {
             + " to index an array");
       }
       unparseItem(writer, call, leftPrec);
+      break;
+    case OVER:
+      call.operand(0).unparse(writer, leftPrec, rightPrec);
+      writer.keyword("OVER");
+      call.operand(1).unparse(writer, leftPrec, rightPrec);
       break;
     default:
       super.unparseCall(writer, call, leftPrec, rightPrec);
@@ -345,6 +345,8 @@ public class BigQuerySqlDialect extends SqlDialect {
       case FLOAT:
       case DOUBLE:
         return createSqlDataTypeSpecByName("FLOAT64", typeName);
+      case REAL:
+        return createSqlDataTypeSpecByName("FLOAT32", typeName);
       case DECIMAL:
         return createSqlDataTypeSpecByName("NUMERIC", typeName);
       case BOOLEAN:

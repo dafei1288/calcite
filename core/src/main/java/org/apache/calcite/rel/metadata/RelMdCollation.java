@@ -18,6 +18,7 @@ package org.apache.calcite.rel.metadata;
 
 import org.apache.calcite.adapter.enumerable.EnumerableCorrelate;
 import org.apache.calcite.adapter.enumerable.EnumerableHashJoin;
+import org.apache.calcite.adapter.enumerable.EnumerableLimit;
 import org.apache.calcite.adapter.enumerable.EnumerableMergeJoin;
 import org.apache.calcite.adapter.enumerable.EnumerableMergeUnion;
 import org.apache.calcite.adapter.enumerable.EnumerableNestedLoopJoin;
@@ -198,6 +199,11 @@ public class RelMdCollation
             join.getJoinType()));
   }
 
+  public @Nullable ImmutableList<RelCollation> collations(EnumerableLimit rel,
+      RelMetadataQuery mq) {
+    return mq.collations(rel.getInput());
+  }
+
   public @Nullable ImmutableList<RelCollation> collations(Sort sort,
       RelMetadataQuery mq) {
     return copyOf(
@@ -310,22 +316,32 @@ public class RelMdCollation
         targetsWithMonotonicity.put(project.i, call.getOperator().getMonotonicity(binding));
       }
     }
-    final List<RelFieldCollation> fieldCollations = new ArrayList<>();
+    List<List<RelFieldCollation>> fieldCollationsList = new ArrayList<>();
   loop:
     for (RelCollation ic : inputCollations) {
       if (ic.getFieldCollations().isEmpty()) {
         continue;
       }
-      fieldCollations.clear();
+      fieldCollationsList.clear();
+      fieldCollationsList.add(new ArrayList<>());
       for (RelFieldCollation ifc : ic.getFieldCollations()) {
         final Collection<Integer> integers = targets.get(ifc.getFieldIndex());
         if (integers.isEmpty()) {
           continue loop; // cannot do this collation
         }
-        fieldCollations.add(ifc.withFieldIndex(integers.iterator().next()));
+        fieldCollationsList = fieldCollationsList.stream()
+            .flatMap(fieldCollations -> integers.stream()
+                .map(integer -> {
+                  List<RelFieldCollation> newFieldCollations = new ArrayList<>(fieldCollations);
+                  newFieldCollations.add(ifc.withFieldIndex(integer));
+                  return newFieldCollations;
+                })).collect(Collectors.toList());
       }
-      assert !fieldCollations.isEmpty();
-      collations.add(RelCollations.of(fieldCollations));
+      assert !fieldCollationsList.isEmpty();
+      for (List<RelFieldCollation> fieldCollations : fieldCollationsList) {
+        assert !fieldCollations.isEmpty();
+        collations.add(RelCollations.of(fieldCollations));
+      }
     }
 
     final List<RelFieldCollation> fieldCollationsForRexCalls =

@@ -40,10 +40,12 @@ import static org.apache.calcite.avatica.util.DateTimeUtils.MILLIS_PER_DAY;
 import static org.apache.calcite.avatica.util.DateTimeUtils.dateStringToUnixDate;
 import static org.apache.calcite.avatica.util.DateTimeUtils.timeStringToUnixDate;
 import static org.apache.calcite.avatica.util.DateTimeUtils.timestampStringToUnixDate;
+import static org.apache.calcite.runtime.SqlFunctions.arraysOverlap;
 import static org.apache.calcite.runtime.SqlFunctions.charLength;
 import static org.apache.calcite.runtime.SqlFunctions.concat;
 import static org.apache.calcite.runtime.SqlFunctions.concatMulti;
 import static org.apache.calcite.runtime.SqlFunctions.concatMultiWithNull;
+import static org.apache.calcite.runtime.SqlFunctions.concatMultiWithSeparator;
 import static org.apache.calcite.runtime.SqlFunctions.concatWithNull;
 import static org.apache.calcite.runtime.SqlFunctions.fromBase64;
 import static org.apache.calcite.runtime.SqlFunctions.greater;
@@ -56,14 +58,11 @@ import static org.apache.calcite.runtime.SqlFunctions.lower;
 import static org.apache.calcite.runtime.SqlFunctions.ltrim;
 import static org.apache.calcite.runtime.SqlFunctions.md5;
 import static org.apache.calcite.runtime.SqlFunctions.position;
-import static org.apache.calcite.runtime.SqlFunctions.posixRegex;
-import static org.apache.calcite.runtime.SqlFunctions.regexpReplace;
 import static org.apache.calcite.runtime.SqlFunctions.rtrim;
 import static org.apache.calcite.runtime.SqlFunctions.sha1;
 import static org.apache.calcite.runtime.SqlFunctions.sha256;
 import static org.apache.calcite.runtime.SqlFunctions.sha512;
 import static org.apache.calcite.runtime.SqlFunctions.toBase64;
-import static org.apache.calcite.runtime.SqlFunctions.toChar;
 import static org.apache.calcite.runtime.SqlFunctions.toInt;
 import static org.apache.calcite.runtime.SqlFunctions.toIntOptional;
 import static org.apache.calcite.runtime.SqlFunctions.toLong;
@@ -96,6 +95,35 @@ class SqlFunctionsTest {
 
   static <E> List<E> list() {
     return ImmutableList.of();
+  }
+
+  @Test void testArraysOverlap() {
+    final List<Object> listWithOnlyNull = new ArrayList<>();
+    listWithOnlyNull.add(null);
+
+    // list2 is empty
+    assertThat(arraysOverlap(list(), list()), is(false));
+    assertThat(arraysOverlap(listWithOnlyNull, list()), is(false));
+    assertThat(arraysOverlap(list(1, null), list()), is(false));
+    assertThat(arraysOverlap(list(1, 2), list()), is(false));
+
+    // list2 contains only nulls
+    assertThat(arraysOverlap(list(), listWithOnlyNull), is(false));
+    assertThat(arraysOverlap(listWithOnlyNull, listWithOnlyNull), is(nullValue()));
+    assertThat(arraysOverlap(list(1, null), listWithOnlyNull), is(nullValue()));
+    assertThat(arraysOverlap(list(1, 2), listWithOnlyNull), is(nullValue()));
+
+    // list2 contains a mixture of nulls and non-nulls
+    assertThat(arraysOverlap(list(), list(1, null)), is(false));
+    assertThat(arraysOverlap(listWithOnlyNull, list(1, null)), is(nullValue()));
+    assertThat(arraysOverlap(list(1, null), list(1, null)), is(true));
+    assertThat(arraysOverlap(list(1, 2), list(1, null)), is(true));
+
+    // list2 contains only non-null
+    assertThat(arraysOverlap(list(), list(1, 2)), is(false));
+    assertThat(arraysOverlap(listWithOnlyNull, list(1, 2)), is(nullValue()));
+    assertThat(arraysOverlap(list(1, null), list(1, 2)), is(true));
+    assertThat(arraysOverlap(list(1, 2), list(1, 2)), is(true));
   }
 
   @Test void testCharLength() {
@@ -170,48 +198,275 @@ class SqlFunctionsTest {
     assertThat(concatMultiWithNull("a", null, "b"), is("ab"));
   }
 
+  @Test void testConcatMultiWithSeparator() {
+    assertThat(concatMultiWithSeparator(",", "a"), is("a"));
+    assertThat(concatMultiWithSeparator(",", "a b", "cd"), is("a b,cd"));
+    assertThat(concatMultiWithSeparator(",", "a b", null, "cd", null, "e"), is("a b,cd,e"));
+    assertThat(concatMultiWithSeparator(",", null, null), is(""));
+    assertThat(concatMultiWithSeparator(",", "", ""), is(","));
+    assertThat(concatMultiWithSeparator("", "a", "b", null, "c"), is("abc"));
+    assertThat(concatMultiWithSeparator("", null, null), is(""));
+    // The separator could be null, and it is treated as empty string
+    assertThat(concatMultiWithSeparator(null, "a", "b", null, "c"), is("abc"));
+    assertThat(concatMultiWithSeparator(null, null, null), is(""));
+  }
+
   @Test void testPosixRegex() {
-    assertThat(posixRegex("abc", "abc", true), is(true));
-    assertThat(posixRegex("abc", "^a", true), is(true));
-    assertThat(posixRegex("abc", "(b|d)", true), is(true));
-    assertThat(posixRegex("abc", "^(b|c)", true), is(false));
+    final SqlFunctions.PosixRegexFunction f =
+        new SqlFunctions.PosixRegexFunction();
+    assertThat(f.posixRegexSensitive("abc", "abc"), is(true));
+    assertThat(f.posixRegexSensitive("abc", "^a"), is(true));
+    assertThat(f.posixRegexSensitive("abc", "(b|d)"), is(true));
+    assertThat(f.posixRegexSensitive("abc", "^(b|c)"), is(false));
 
-    assertThat(posixRegex("abc", "ABC", false), is(true));
-    assertThat(posixRegex("abc", "^A", false), is(true));
-    assertThat(posixRegex("abc", "(B|D)", false), is(true));
-    assertThat(posixRegex("abc", "^(B|C)", false), is(false));
+    assertThat(f.posixRegexInsensitive("abc", "ABC"), is(true));
+    assertThat(f.posixRegexInsensitive("abc", "^A"), is(true));
+    assertThat(f.posixRegexInsensitive("abc", "(B|D)"), is(true));
+    assertThat(f.posixRegexInsensitive("abc", "^(B|C)"), is(false));
 
-    assertThat(posixRegex("abc", "^[[:xdigit:]]$", false), is(false));
-    assertThat(posixRegex("abc", "^[[:xdigit:]]+$", false), is(true));
-    assertThat(posixRegex("abcq", "^[[:xdigit:]]+$", false), is(false));
+    assertThat(f.posixRegexInsensitive("abc", "^[[:xdigit:]]$"), is(false));
+    assertThat(f.posixRegexInsensitive("abc", "^[[:xdigit:]]+$"), is(true));
+    assertThat(f.posixRegexInsensitive("abcq", "^[[:xdigit:]]+$"), is(false));
 
-    assertThat(posixRegex("abc", "[[:xdigit:]]", false), is(true));
-    assertThat(posixRegex("abc", "[[:xdigit:]]+", false), is(true));
-    assertThat(posixRegex("abcq", "[[:xdigit:]]", false), is(true));
+    assertThat(f.posixRegexInsensitive("abc", "[[:xdigit:]]"), is(true));
+    assertThat(f.posixRegexInsensitive("abc", "[[:xdigit:]]+"), is(true));
+    assertThat(f.posixRegexInsensitive("abcq", "[[:xdigit:]]"), is(true));
+  }
+
+  @Test void testRegexpContains() {
+    final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
+
+    // Use same regex; should hit cache
+    assertThat(f.regexpContains("abcdef", "abz*"), is(true));
+    assertThat(f.regexpContains("zabzz", "abz*"), is(true));
+    assertThat(f.regexpContains("zazbbzz", "abz*"), is(false));
+    assertThat(f.regexpContains("abcadcabcaecghi", ""), is(true));
+
+    try {
+      final boolean b = f.regexpContains("abc def ghi", "(abc");
+      fail("expected error, got " + b);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid regular expression for REGEXP_CONTAINS: 'Unclosed "
+              + "group near index 4 (abc'"));
+    }
+
+    try {
+      final boolean b = f.regexpContains("abc def ghi", "[z-a]");
+      fail("expected error, got " + b);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid regular expression for REGEXP_CONTAINS: 'Illegal "
+              + "character range near index 3 [z-a]    ^'"));
+    }
+
+    try {
+      final boolean b = f.regexpContains("abc def ghi", "{2,1}");
+      fail("expected error, got " + b);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid regular expression for REGEXP_CONTAINS: 'Illegal "
+              + "repetition range near index 4 {2,1}     ^'"));
+    }
+  }
+
+  @Test void testRegexpExtract() {
+    final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
+
+    // basic extracts
+    assertThat(f.regexpExtract("abcadcabcaecghi", "ac"), nullValue());
+    assertThat(f.regexpExtract("abcadcabcaecghi", ""), is(""));
+    assertThat(f.regexpExtract("a9cadca5c4aecghi", "a[0-9]c"), is("a9c"));
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.*c"), is("abcadcabcaec"));
+
+    // capturing group extracts
+    assertThat(f.regexpExtract("abcadcabcaecghi", "abc(a.c)"), is("adc"));
+    assertThat(f.regexpExtract("abcadcabcaecghi", "abc(a.c)", 4), is("aec"));
+    assertThat(f.regexpExtract("abcadcabcaecghi", "abc(a.c)", 1, 2), is("aec"));
+
+    // position-based extracts
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.c", 25), nullValue());
+    assertThat(f.regexpExtract("a9cadca5c4aecghi", "a[0-9]c", 1), is("a9c"));
+    assertThat(f.regexpExtract("a9cadca5c4aecghi", "a[0-9]c", 6), is("a5c"));
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.*c", 7), is("abcaec"));
+
+    // occurrence-based extracts
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.c", 1, 3), is("abc"));
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.c", 2, 3), is("aec"));
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.c", 1, 5), nullValue());
+    assertThat(f.regexpExtract("abcadcabcaecghi", "a.+c", 1, 2), nullValue());
+
+    // exceptional scenarios
+    try {
+      final String s = f.regexpExtract("abc def ghi", "(abc");
+      fail("expected error, got " + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid regular expression for REGEXP_EXTRACT: 'Unclosed group near index 4 "
+              + "(abc'"));
+    }
+
+    try {
+      final String s = f.regexpExtract("abcadcabcaecghi", "(abc)ax(a.c)");
+      fail("expected error, got " + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Multiple capturing groups (count=2) not allowed in regex input for "
+              + "REGEXP_EXTRACT"));
+    }
+
+    try {
+      final String s = f.regexpExtract("abcadcabcaecghi", "a.c", 0);
+      fail("expected error, got " + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid integer input '0' for argument 'position' in REGEXP_EXTRACT"));
+    }
+
+    try {
+      final String s = f.regexpExtract("abcadcabcaecghi", "a.c", 3, -1);
+      fail("expected error, got " + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid integer input '-1' for argument 'occurrence' in REGEXP_EXTRACT"));
+    }
+
+    try {
+      final String s = f.regexpExtract("abcadcabcaecghi", "a.c", -4, 4);
+      fail("expected error, got " + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid integer input '-4' for argument 'position' in REGEXP_EXTRACT"));
+    }
+  }
+
+  @Test void testRegexpExtractAll() {
+    final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
+
+    assertThat(f.regexpExtractAll("abcadcabcaecghi", "ac"), is(list()));
+    assertThat(f.regexpExtractAll("abcadc", ""), is(list("", "", "", "", "", "", "")));
+    assertThat(f.regexpExtractAll("abcadcabcaecghi", "abc(a.c)"), is(list("adc", "aec")));
+    assertThat(f.regexpExtractAll("abcadcabcaecghi", "a.c"), is(list("abc", "adc", "abc", "aec")));
+    assertThat(f.regexpExtractAll("banana", "ana"), is(list("ana")));
+    assertThat(f.regexpExtractAll("abacadaeafa", "a.a"), is(list("aba", "ada", "afa")));
+    assertThat(f.regexpExtractAll("abcdefghijklmnop", ".+"), is(list("abcdefghijklmnop")));
+
+    try {
+      final List<String> s = f.regexpExtractAll("abc def ghi", "(abc");
+      fail("expected error, got array: " + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid regular expression for REGEXP_EXTRACT_ALL: 'Unclosed group near index 4 "
+              + "(abc'"));
+    }
+
+    try {
+      final List<String> s = f.regexpExtractAll("abcadcabcaecghi", "(abc).(ax).(a.c)");
+      fail("expected error, got array:" + s);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Multiple capturing groups (count=3) not allowed in regex input for "
+              + "REGEXP_EXTRACT_ALL"));
+    }
+  }
+
+  @Test void testRegexpInstr() {
+    final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
+
+    // basic searches
+    assertThat(f.regexpInstr("abcdefghij", "adc"), is(0));
+    assertThat(f.regexpInstr("abcdefghij", ""), is(0));
+    assertThat(f.regexpInstr("a9ca5c4aechi", "a[0-9]c"), is(1));
+    assertThat(f.regexpInstr("abcadcabcaecghi", ".dc"), is(4));
+
+    // capturing group searches
+    assertThat(f.regexpInstr("abcadcabcaecghi", "abc(a.c)"), is(4));
+    assertThat(f.regexpInstr("abcadcabcaecghi", "abc(a.c)", 4), is(10));
+    assertThat(f.regexpInstr("abcadcabcaecghi", "abc(a.c)", 1, 2), is(10));
+    assertThat(f.regexpInstr("abcadcabcaecghi", "abc(a.c)", 1, 2, 1), is(13));
+
+    // position-based searches
+    assertThat(f.regexpInstr("abcadcabcaecghi", ".ec", 25), is(0));
+    assertThat(f.regexpInstr("a9cadca5c4aecghi", "a[0-9]c", 4), is(7));
+    assertThat(f.regexpInstr("abcadcabcaecghi", "a.*c", 7), is(7));
+
+    // occurrence-based searches
+    assertThat(f.regexpInstr("a9cadca5c4aecghi", "a[0-9]c", 1, 3), is(0));
+    assertThat(f.regexpInstr("a9cadca5c4aecghi", "a[0-9]c", 2, 1), is(7));
+    assertThat(f.regexpInstr("a9cadca5c4aecghi", "a[0-9]c", 1, 1), is(1));
+
+    // occurrence_position-based searches
+    assertThat(f.regexpInstr("a9cadca5c4aecghi", "a[0-9]c", 1, 1, 0), is(1));
+    assertThat(f.regexpInstr("abcadcabcaecghi", "abc(a.c)", 7, 1, 1), is(13));
+    assertThat(f.regexpInstr("abcadcabcaec", "abc(a.c)", 4, 1, 1), is(13));
+
+    // exceptional scenarios
+    try {
+      final int idx = f.regexpInstr("abc def ghi", "{4,1}");
+      fail("expected error, got " + idx);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid regular expression for REGEXP_INSTR: 'Illegal repetition range near index 4"
+              + " {4,1}     ^'"));
+    }
+
+    try {
+      final int idx = f.regexpInstr("abcadcabcaecghi", "(.)a(.c)");
+      fail("expected error, got " + idx);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Multiple capturing groups (count=2) not allowed in regex input for "
+              + "REGEXP_INSTR"));
+    }
+
+    try {
+      final int idx = f.regexpInstr("abcadcabcaecghi", "a.c", 0);
+      fail("expected error, got " + idx);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid integer input '0' for argument 'position' in REGEXP_INSTR"));
+    }
+
+    try {
+      final int idx = f.regexpInstr("abcadcabcaecghi", "a.c", 3, -1);
+      fail("expected error, got " + idx);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid integer input '-1' for argument 'occurrence' in REGEXP_INSTR"));
+    }
+
+    try {
+      final int idx = f.regexpInstr("abcadcabcaecghi", "a.c", 2, 4, -4);
+      fail("expected error, got " + idx);
+    } catch (RuntimeException e) {
+      assertThat(e.getMessage(),
+          is("Invalid integer input '-4' for argument 'occurrence_position' in REGEXP_INSTR"));
+    }
   }
 
   @Test void testRegexpReplace() {
-    assertThat(regexpReplace("a b c", "b", "X"), is("a X c"));
-    assertThat(regexpReplace("abc def ghi", "[g-z]+", "X"), is("abc def X"));
-    assertThat(regexpReplace("abc def ghi", "[a-z]+", "X"), is("X X X"));
-    assertThat(regexpReplace("a b c", "a|b", "X"), is("X X c"));
-    assertThat(regexpReplace("a b c", "y", "X"), is("a b c"));
+    final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
+    assertThat(f.regexpReplace("a b c", "b", "X"), is("a X c"));
+    assertThat(f.regexpReplace("abc def ghi", "[g-z]+", "X"), is("abc def X"));
+    assertThat(f.regexpReplace("abc def ghi", "[a-z]+", "X"), is("X X X"));
+    assertThat(f.regexpReplace("a b c", "a|b", "X"), is("X X c"));
+    assertThat(f.regexpReplace("a b c", "y", "X"), is("a b c"));
 
-    assertThat(regexpReplace("100-200", "(\\d+)", "num"), is("num-num"));
-    assertThat(regexpReplace("100-200", "(\\d+)", "###"), is("###-###"));
-    assertThat(regexpReplace("100-200", "(-)", "###"), is("100###200"));
+    assertThat(f.regexpReplace("100-200", "(\\d+)", "num"), is("num-num"));
+    assertThat(f.regexpReplace("100-200", "(\\d+)", "###"), is("###-###"));
+    assertThat(f.regexpReplace("100-200", "(-)", "###"), is("100###200"));
 
-    assertThat(regexpReplace("abc def ghi", "[a-z]+", "X", 1), is("X X X"));
-    assertThat(regexpReplace("abc def ghi", "[a-z]+", "X", 2), is("aX X X"));
-    assertThat(regexpReplace("abc def ghi", "[a-z]+", "X", 1, 3),
+    assertThat(f.regexpReplace("abc def ghi", "[a-z]+", "X", 1), is("X X X"));
+    assertThat(f.regexpReplace("abc def ghi", "[a-z]+", "X", 2), is("aX X X"));
+    assertThat(f.regexpReplace("abc def ghi", "[a-z]+", "X", 1, 3),
         is("abc def X"));
-    assertThat(regexpReplace("abc def GHI", "[a-z]+", "X", 1, 3, "c"),
+    assertThat(f.regexpReplace("abc def GHI", "[a-z]+", "X", 1, 3, "c"),
         is("abc def GHI"));
-    assertThat(regexpReplace("abc def GHI", "[a-z]+", "X", 1, 3, "i"),
+    assertThat(f.regexpReplace("abc def GHI", "[a-z]+", "X", 1, 3, "i"),
         is("abc def X"));
 
     try {
-      regexpReplace("abc def ghi", "[a-z]+", "X", 0);
+      f.regexpReplace("abc def ghi", "[a-z]+", "X", 0);
       fail("'regexp_replace' on an invalid pos is not possible");
     } catch (CalciteException e) {
       assertThat(e.getMessage(),
@@ -219,11 +474,77 @@ class SqlFunctionsTest {
     }
 
     try {
-      regexpReplace("abc def ghi", "[a-z]+", "X", 1, 3, "WWW");
+      f.regexpReplace("abc def ghi", "[a-z]+", "X", 1, 3, "WWW");
       fail("'regexp_replace' on an invalid matchType is not possible");
     } catch (CalciteException e) {
       assertThat(e.getMessage(),
           is("Invalid input for REGEXP_REPLACE: 'WWW'"));
+    }
+  }
+
+  @Test void testReplaceNonDollarIndexedString() {
+    assertThat(SqlFunctions.RegexFunction.replaceNonDollarIndexedString("\\\\4_\\\\2"),
+        is("$4_$2"));
+    assertThat(SqlFunctions.RegexFunction.replaceNonDollarIndexedString("abc123"),
+        is("abc123"));
+    assertThat(SqlFunctions.RegexFunction.replaceNonDollarIndexedString("$007"),
+        is("\\$007"));
+    assertThat(SqlFunctions.RegexFunction.replaceNonDollarIndexedString("\\\\\\\\ \\\\\\\\"),
+        is("\\\\ \\\\"));
+    assertThat(SqlFunctions.RegexFunction.replaceNonDollarIndexedString("\\\\\\\\$ $\\\\\\\\"),
+        is("\\\\\\$ \\$\\\\"));
+    try {
+      SqlFunctions.RegexFunction.replaceNonDollarIndexedString("\\\\-x");
+      fail("'regexp_replace' with invalid replacement pattern is not possible");
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid replacement pattern for REGEXP_REPLACE: '\\\\-x'"));
+    }
+    try {
+      SqlFunctions.RegexFunction.replaceNonDollarIndexedString("\\\\ \\\\");
+      fail("'regexp_replace' with invalid replacement pattern is not possible");
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid replacement pattern for REGEXP_REPLACE: '\\\\ \\\\'"));
+    }
+    try {
+      SqlFunctions.RegexFunction.replaceNonDollarIndexedString("\\\\a");
+      fail("'regexp_replace' with invalid replacement pattern is not possible");
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid replacement pattern for REGEXP_REPLACE: '\\\\a'"));
+    }
+  }
+
+  @Test void testRegexpReplaceNonDollarIndexed() {
+    final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
+    assertThat(f.regexpReplaceNonDollarIndexed("abascusB", "b", "X"), is("aXascusB"));
+    assertThat(f.regexpReplaceNonDollarIndexed("abc01def02ghi", "[a-z]+", "X"), is("X01X02X"));
+    assertThat(f.regexpReplaceNonDollarIndexed("a0b1c2d3", "0|2", "X"), is("aXb1cXd3"));
+
+    // Test double-backslash indexing for capturing groups
+    assertThat(f.regexpReplaceNonDollarIndexed("abc_defcon", "([a-z])_([a-z])", "\\\\2_\\\\1"),
+        is("abd_cefcon"));
+    assertThat(f.regexpReplaceNonDollarIndexed("1\\2\\3\\4\\5", "2.(.).4", "\\\\1"),
+        is("1\\3\\5"));
+    assertThat(f.regexpReplaceNonDollarIndexed("abc16", "b(.*)(\\d)", "\\\\\\\\"),
+        is("a\\"));
+    assertThat(f.regexpReplaceNonDollarIndexed("qwerty123", "([0-9]+)", "$147"),
+        is("qwerty$147"));
+
+    try {
+      f.regexpReplaceNonDollarIndexed("abcdefghijabc", "abc(.)", "\\\\-11x");
+      fail("'regexp_replace' with invalid replacement pattern is not possible");
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid replacement pattern for REGEXP_REPLACE: '\\\\-11x'"));
+    }
+    try {
+      f.regexpReplaceNonDollarIndexed("abcdefghijabc", "abc(.)", "\\\11x");
+      fail("'regexp_replace' with invalid replacement pattern is not possible");
+    } catch (CalciteException e) {
+      assertThat(e.getMessage(),
+          is("Invalid replacement pattern for REGEXP_REPLACE: '\\\tx'"));
     }
   }
 
@@ -1418,24 +1739,23 @@ class SqlFunctionsTest {
     String pattern1 = "YYYY-MM-DD HH24:MI:SS.MS";
     String pattern2 = "Day, DD HH12:MI:SS";
 
-    assertThat(
-        toChar(0, pattern1),
+    final SqlFunctions.DateFormatFunction f =
+        new SqlFunctions.DateFormatFunction();
+    assertThat(f.toChar(0, pattern1),
         is("1970-01-01 00:00:00.000"));
 
-    assertThat(
-        toChar(0, pattern2),
+    assertThat(f.toChar(0, pattern2),
         is("Thursday, 01 12:00:00"));
 
-    assertThat(
-        toChar(timestampStringToUnixDate("2014-09-30 15:28:27.356"), pattern1),
+    final long ts0 = timestampStringToUnixDate("2014-09-30 15:28:27.356");
+    assertThat(f.toChar(ts0, pattern1),
         is("2014-09-30 15:28:27.356"));
 
-    assertThat(
-        toChar(timestampStringToUnixDate("2014-09-30 15:28:27.356"), pattern2),
+    assertThat(f.toChar(ts0, pattern2),
         is("Tuesday, 30 03:28:27"));
 
-    assertThat(
-        toChar(timestampStringToUnixDate("1500-04-30 12:00:00.123"), pattern1),
+    final long ts1 = timestampStringToUnixDate("1500-04-30 12:00:00.123");
+    assertThat(f.toChar(ts1, pattern1),
         is("1500-04-30 12:00:00.123"));
   }
 

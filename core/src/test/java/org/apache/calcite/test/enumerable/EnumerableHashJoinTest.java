@@ -17,13 +17,13 @@
 package org.apache.calcite.test.enumerable;
 
 import org.apache.calcite.adapter.enumerable.EnumerableRules;
-import org.apache.calcite.adapter.java.ReflectiveSchema;
 import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.test.CalciteAssert;
+import org.apache.calcite.test.ReflectiveSchemaWithoutRowCount;
 import org.apache.calcite.test.schemata.hr.HrSchema;
 
 import org.junit.jupiter.api.Test;
@@ -54,24 +54,6 @@ class EnumerableHashJoinTest {
             "empid=100; name=Bill; dept=Sales",
             "empid=110; name=Theodore; dept=Sales",
             "empid=150; name=Sebastian; dept=Sales");
-  }
-
-  @Test void innerJoinWithPredicate() {
-    tester(false, new HrSchema())
-        .query(
-            "select e.empid, e.name, d.name as dept from emps e join depts d"
-                + " on e.deptno=d.deptno and e.empid<150 and e.empid>d.deptno")
-        .explainContains("EnumerableCalc(expr#0..4=[{inputs}], empid=[$t0], name=[$t2], "
-            + "dept=[$t4])\n"
-            + "  EnumerableHashJoin(condition=[AND(=($1, $3), >($0, $3))], joinType=[inner])\n"
-            + "    EnumerableCalc(expr#0..4=[{inputs}], expr#5=[150], expr#6=[<($t0, $t5)], "
-            + "proj#0..2=[{exprs}], $condition=[$t6])\n"
-            + "      EnumerableTableScan(table=[[s, emps]])\n"
-            + "    EnumerableCalc(expr#0..3=[{inputs}], proj#0..1=[{exprs}])\n"
-            + "      EnumerableTableScan(table=[[s, depts]])\n")
-        .returnsUnordered(
-            "empid=100; name=Bill; dept=Sales",
-            "empid=110; name=Theodore; dept=Sales");
   }
 
   @Test void leftOuterJoin() {
@@ -201,11 +183,129 @@ class EnumerableHashJoinTest {
             "name=Sebastian; salary=7000.0");
   }
 
+  @Test void innerJoinWithPredicate() {
+    tester(false, new HrSchema())
+        .query(
+            "select e.empid, e.name, d.name as dept from emps e join depts d"
+                + " on e.deptno=d.deptno and e.empid<150 and e.empid>d.deptno")
+        .explainContains("EnumerableCalc(expr#0..4=[{inputs}], empid=[$t0], name=[$t2], "
+            + "dept=[$t4])\n"
+            + "  EnumerableHashJoin(condition=[AND(=($1, $3), >($0, $3))], joinType=[inner])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], expr#5=[150], expr#6=[<($t0, $t5)], "
+            + "proj#0..2=[{exprs}], $condition=[$t6])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n"
+            + "    EnumerableCalc(expr#0..3=[{inputs}], proj#0..1=[{exprs}])\n"
+            + "      EnumerableTableScan(table=[[s, depts]])\n")
+        .returnsUnordered(
+            "empid=100; name=Bill; dept=Sales",
+            "empid=110; name=Theodore; dept=Sales");
+  }
+
+  @Test void innerJoinWithCompositeKeyAndNullValues() {
+    tester(false, new HrSchema())
+        .query(
+            "select e1.empid from emps e1 join emps e2 "
+                + "on e1.deptno=e2.deptno and e1.commission=e2.commission")
+        .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner ->
+            planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE))
+        .explainContains("EnumerableCalc(expr#0..4=[{inputs}], empid=[$t0])\n"
+            + "  EnumerableHashJoin(condition=[AND(=($1, $3), =($2, $4))], joinType=[inner])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], deptno=[$t1], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n")
+        .returnsUnordered(
+            "empid=100",
+            "empid=110",
+            "empid=200");
+  }
+
+  @Test void leftOuterJoinWithCompositeKeyAndNullValues() {
+    tester(false, new HrSchema())
+        .query(
+            "select e1.empid, e2.empid from emps e1 left outer join emps e2 "
+                + "on e1.deptno=e2.deptno and e1.commission=e2.commission")
+        .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner ->
+            planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE))
+        .explainContains("EnumerableCalc(expr#0..5=[{inputs}], empid=[$t0], empid0=[$t3])\n"
+            + "  EnumerableHashJoin(condition=[AND(=($1, $4), =($2, $5))], joinType=[left])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n")
+        .returnsUnordered(
+            "empid=100; empid=100",
+            "empid=110; empid=110",
+            "empid=150; empid=null",
+            "empid=200; empid=200");
+  }
+
+  @Test void rightOuterJoinWithCompositeKeyAndNullValues() {
+    tester(false, new HrSchema())
+        .query(
+            "select e1.empid, e2.empid from emps e1 right outer join emps e2 "
+                + "on e1.deptno=e2.deptno and e1.commission=e2.commission")
+        .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner ->
+            planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE))
+        .explainContains("EnumerableCalc(expr#0..5=[{inputs}], empid=[$t0], empid0=[$t3])\n"
+            + "  EnumerableHashJoin(condition=[AND(=($1, $4), =($2, $5))], joinType=[right])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n")
+        .returnsUnordered(
+            "empid=100; empid=100",
+            "empid=110; empid=110",
+            "empid=200; empid=200",
+            "empid=null; empid=150");
+  }
+
+  @Test void fullOuterJoinWithCompositeKeyAndNullValues() {
+    tester(false, new HrSchema())
+        .query(
+            "select e1.empid, e2.empid from emps e1 full outer join emps e2 "
+                + "on e1.deptno=e2.deptno and e1.commission=e2.commission")
+        .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner ->
+            planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE))
+        .explainContains("EnumerableCalc(expr#0..5=[{inputs}], empid=[$t0], empid0=[$t3])\n"
+            + "  EnumerableHashJoin(condition=[AND(=($1, $4), =($2, $5))], joinType=[full])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n")
+        .returnsUnordered(
+            "empid=100; empid=100",
+            "empid=110; empid=110",
+            "empid=150; empid=null",
+            "empid=200; empid=200",
+            "empid=null; empid=150");
+  }
+
+  @Test void semiJoinWithCompositeKeyAndNullValues() {
+    tester(true, new HrSchema())
+        .query(
+            "select e1.empid from emps e1 where exists (select 1 from emps e2 "
+                + "where e1.deptno=e2.deptno and e1.commission=e2.commission)")
+        .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
+          planner.removeRule(EnumerableRules.ENUMERABLE_MERGE_JOIN_RULE);
+        })
+        .explainContains("EnumerableCalc(expr#0..2=[{inputs}], empid=[$t0])\n"
+            + "  EnumerableHashJoin(condition=[AND(=($1, $4), =($2, $7))], joinType=[semi])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], proj#0..1=[{exprs}], commission=[$t4])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n"
+            + "    EnumerableCalc(expr#0..4=[{inputs}], expr#5=[IS NOT NULL($t4)], proj#0..4=[{exprs}], $condition=[$t5])\n"
+            + "      EnumerableTableScan(table=[[s, emps]])\n")
+        .returnsUnordered(
+            "empid=100",
+            "empid=110",
+            "empid=200");
+  }
+
   private CalciteAssert.AssertThat tester(boolean forceDecorrelate,
       Object schema) {
     return CalciteAssert.that()
         .with(CalciteConnectionProperty.LEX, Lex.JAVA)
         .with(CalciteConnectionProperty.FORCE_DECORRELATE, forceDecorrelate)
-        .withSchema("s", new ReflectiveSchema(schema));
+        .withSchema("s", new ReflectiveSchemaWithoutRowCount(schema));
   }
 }

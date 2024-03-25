@@ -22,6 +22,7 @@ import org.apache.calcite.linq4j.Enumerable;
 import org.apache.calcite.linq4j.Enumerator;
 import org.apache.calcite.linq4j.Linq4j;
 import org.apache.calcite.linq4j.Ord;
+import org.apache.calcite.linq4j.function.Functions;
 import org.apache.calcite.linq4j.function.Parameter;
 import org.apache.calcite.runtime.ConsList;
 import org.apache.calcite.runtime.FlatLists;
@@ -61,7 +62,6 @@ import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.lang.management.MemoryType;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.text.MessageFormat;
@@ -99,11 +99,13 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.ObjIntConsumer;
 import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 
 import static org.apache.calcite.test.Matchers.isLinux;
+import static org.apache.calcite.util.ReflectUtil.isStatic;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -949,16 +951,16 @@ class UtilTest {
 
     assertThat(SqlLibrary.expand(ImmutableList.of(a)),
         hasToString("[ALL, BIG_QUERY, CALCITE, HIVE, MSSQL, MYSQL, ORACLE, "
-            + "POSTGRESQL, SPARK]"));
+            + "POSTGRESQL, SNOWFLAKE, SPARK]"));
     assertThat(SqlLibrary.expand(ImmutableList.of(a, c)),
         hasToString("[ALL, BIG_QUERY, CALCITE, HIVE, MSSQL, MYSQL, ORACLE, "
-            + "POSTGRESQL, SPARK]"));
+            + "POSTGRESQL, SNOWFLAKE, SPARK]"));
     assertThat(SqlLibrary.expand(ImmutableList.of(c, a)),
         hasToString("[CALCITE, ALL, BIG_QUERY, HIVE, MSSQL, MYSQL, ORACLE, "
-            + "POSTGRESQL, SPARK]"));
+            + "POSTGRESQL, SNOWFLAKE, SPARK]"));
     assertThat(SqlLibrary.expand(ImmutableList.of(c, o, a)),
         hasToString("[CALCITE, ORACLE, ALL, BIG_QUERY, HIVE, MSSQL, MYSQL, "
-            + "POSTGRESQL, SPARK]"));
+            + "POSTGRESQL, SNOWFLAKE, SPARK]"));
     assertThat(SqlLibrary.expand(ImmutableList.of(o, c, o)),
         hasToString("[ORACLE, CALCITE]"));
 
@@ -1046,7 +1048,7 @@ class UtilTest {
 
     final List<Pair<String, Integer>> pairs =
         Pair.zip(strings, integers, false);
-    final Map<String, Integer> map = Compatible.copyOf(pairs);
+    final Map<String, Integer> map = ImmutableMap.copyOf(pairs);
 
     // shorter list on the right
     final AtomicInteger size = new AtomicInteger();
@@ -1875,6 +1877,38 @@ class UtilTest {
     assertThat(Util.distinctList(a1m), is(a));
   }
 
+  @Test void testIsDefinitelyDistinctAndNonNull() {
+    final BiConsumer<List<String>, Boolean> f = (list, b) -> {
+      assertThat(Util.isDefinitelyDistinctAndNonNull(list), is(b));
+    };
+
+    f.accept(ImmutableList.of(), true);
+    f.accept(Collections.singletonList(null), false);
+    f.accept(list("a", "b", "a"), false);
+    f.accept(list("a", "b", "c"), true);
+    f.accept(list(null, "b", "c"), false);
+    f.accept(list(null, "b", null), false);
+    f.accept(list(null, null), false);
+    final IntFunction<String> stringFn =
+        i -> String.valueOf((char) ('a' + i));
+    // {"a", "b", "c", "d", "e", "f"} is distinct
+    final List<String> alpha6 = Functions.generate(6, stringFn);
+    f.accept(alpha6, true);
+    // {"a", ... "n"} is distinct
+    final List<String> alpha14 =
+        new ArrayList<>(Functions.generate(14, stringFn));
+    f.accept(alpha14, true);
+    alpha14.set(10, "a");
+    f.accept(alpha14, false);
+    alpha14.set(10, null);
+    f.accept(alpha14, false);
+    alpha14.set(10, "z");
+    f.accept(alpha14, true);
+    // {"a", ... "t"} is distinct but has length above the threshold,
+    // so gives a false negative
+    f.accept(Functions.generate(20, stringFn), false);
+  }
+
   /** Unit test for {@link Utilities#hashCode(double)}. */
   @Test void testHash() {
     checkHash(0d);
@@ -1922,7 +1956,7 @@ class UtilTest {
 
   private void checkResourceMethodNames(Object resource) {
     for (Method method : resource.getClass().getMethods()) {
-      if (!Modifier.isStatic(method.getModifiers())
+      if (!isStatic(method)
           && !method.getName().matches("^[a-z][A-Za-z0-9_]*$")) {
         fail("resource method name must be camel case: " + method.getName());
       }
@@ -2933,7 +2967,7 @@ class UtilTest {
     assertThat(describe(isLinux("X")), is("is \"X\""));
     assertThat(Unsafe.matches(isLinux("x\ny"), "x\ny"), is(true));
     assertThat(Unsafe.matches(isLinux("x\ny"), "x\r\ny"), is(true));
-    //\n\r is not a valid windows line ending
+    // "\n\r" is not a valid windows line ending
     assertThat(Unsafe.matches(isLinux("x\ny"), "x\n\ry"), is(false));
     assertThat(Unsafe.matches(isLinux("x\ny"), "x\n\ryz"), is(false));
     // left-hand side must be linux or will never match

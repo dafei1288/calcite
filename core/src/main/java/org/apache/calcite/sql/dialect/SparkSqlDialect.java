@@ -104,6 +104,10 @@ public class SparkSqlDialect extends SqlDialect {
     return true;
   }
 
+  @Override public boolean supportsTimestampPrecision() {
+    return false;
+  }
+
   @Override public void unparseOffsetFetch(SqlWriter writer, @Nullable SqlNode offset,
       @Nullable SqlNode fetch) {
     unparseFetchUsingLimit(writer, offset, fetch);
@@ -146,6 +150,9 @@ public class SparkSqlDialect extends SqlDialect {
         break;
       case TRIM:
         unparseHiveTrim(writer, call, leftPrec, rightPrec);
+        break;
+      case POSITION:
+        SqlUtil.unparseFunctionSyntax(SqlStdOperatorTable.POSITION, writer, call, false);
         break;
       default:
         super.unparseCall(writer, call, leftPrec, rightPrec);

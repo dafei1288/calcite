@@ -16,8 +16,6 @@
  */
 package org.apache.calcite.util;
 
-import org.apache.commons.io.input.ReaderInputStream;
-
 import com.google.common.io.CharSource;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -36,6 +34,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -123,6 +122,10 @@ public abstract class Sources {
       throw unsupported();
     }
 
+    @Override public Optional<File> fileOpt() {
+      return Optional.empty();
+    }
+
     @Override public String path() {
       throw unsupported();
     }
@@ -132,8 +135,7 @@ public abstract class Sources {
     }
 
     @Override public InputStream openStream() throws IOException {
-      // use charSource.asByteSource() once calcite can use guava v21+
-      return new ReaderInputStream(reader(), StandardCharsets.UTF_8);
+      return charSource.asByteSource(StandardCharsets.UTF_8).openStream();
     }
 
     @Override public String protocol() {
@@ -251,6 +253,10 @@ public abstract class Sources {
         throw new UnsupportedOperationException();
       }
       return file;
+    }
+
+    @Override public Optional<File> fileOpt() {
+      return Optional.ofNullable(file);
     }
 
     @Override public String protocol() {

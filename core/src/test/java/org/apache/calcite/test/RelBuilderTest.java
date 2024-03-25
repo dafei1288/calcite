@@ -100,6 +100,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -1487,6 +1488,67 @@ public class RelBuilderTest {
         + "SD1=[SUM(DISTINCT $1)], C=[COUNT()], MD2=[MIN($2)])\n"
         + "    LogicalTableScan(table=[[scott, EMP]])\n";
     assertThat(root, hasTree(expected));
+  }
+
+  /**
+   * Test reproducing issue CALCITE-6261.
+   */
+  @Test void testAggregateDuplicateAggCallsWithForceProjectAndFieldPruning() {
+    final Function<RelBuilder, RelNode> f1 = builder ->
+        // single table scan with force project of all columns
+        builder.scan("EMP")
+            .project(
+                ImmutableList.of(
+                    builder.field("EMPNO"),
+                    builder.field("ENAME"),
+                    builder.field("JOB"),
+                    builder.field("MGR"),
+                    builder.field("HIREDATE"),
+                    builder.field("SAL"),
+                    builder.field("COMM"),
+                    builder.field("DEPTNO")),
+                ImmutableList.of(),
+                true)
+            .aggregate(
+                builder.groupKey(builder.field("MGR")),
+                // duplicate avg() agg calls
+                builder.avg(false, "SALARY_AVG", builder.field("SAL")),
+                builder.sum(false, "SALARY_SUM", builder.field("SAL")),
+                builder.avg(false, "SALARY_MEAN", builder.field("SAL")))
+            .build();
+    final String expected = ""
+        + "LogicalProject(MGR=[$0], SALARY_AVG=[$1], SALARY_SUM=[$2], SALARY_MEAN=[$1])\n"
+        + "  LogicalAggregate(group=[{0}], SALARY_AVG=[AVG($1)], SALARY_SUM=[SUM($1)])\n"
+        + "    LogicalProject(MGR=[$3], SAL=[$5])\n"
+        + "      LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f1.apply(createBuilder()), hasTree(expected));
+  }
+
+  /**
+   * Test recreating the reproducer from issue CALCITE-5888 but with the existing scott tables.
+   */
+  @Test void testAggregateDuplicateAggCallsAndFieldPruningWithJoinAndLiteralGroupKey() {
+    final Function<RelBuilder, RelNode> f1 = builder ->
+        // first inner join two tables
+        builder.scan("EMP").scan("DEPT")
+            .join(JoinRelType.INNER, "DEPTNO")
+            .aggregate(
+                // null group key
+                builder.groupKey(builder.cast(builder.literal(null), SqlTypeName.INTEGER)),
+                // duplicated min/max agg calls
+                builder.min(builder.field("SAL")),
+                builder.max(builder.field("SAL")),
+                builder.min(builder.field("SAL")),
+                builder.max(builder.field("SAL")))
+            .build();
+    final String expected = ""
+        + "LogicalProject($f11=[$0], $f1=[$1], $f2=[$2], $f10=[$1], $f20=[$2])\n"
+        + "  LogicalAggregate(group=[{1}], agg#0=[MIN($0)], agg#1=[MAX($0)])\n"
+        + "    LogicalProject(SAL=[$5], $f11=[null:INTEGER])\n"
+        + "      LogicalJoin(condition=[=($7, $8)], joinType=[inner])\n"
+        + "        LogicalTableScan(table=[[scott, EMP]])\n"
+        + "        LogicalTableScan(table=[[scott, DEPT]])\n";
+    assertThat(f1.apply(createBuilder()), hasTree(expected));
   }
 
   @Test void testAggregateFilter() {
@@ -3671,6 +3733,51 @@ public class RelBuilderTest {
   }
 
   /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6128">[CALCITE-6128]
+   * RelBuilder.sortLimit should compose offset and fetch</a>. */
+  @Test void testSortOffsetLimit() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   ORDER BY deptno OFFSET 2 LIMIT 3
+
+    // Case 1. Set sort+offset, then set fetch.
+    final Function<RelBuilder, RelNode> f = b ->
+        b.scan("EMP")
+            .sortLimit(2, -1, b.field("DEPTNO")) // ORDER BY deptno OFFSET 2
+            .limit(-1, 3) // LIMIT 3
+            .build();
+    final String expected = ""
+        + "LogicalSort(sort0=[$7], dir0=[ASC], offset=[2], fetch=[3])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+    assertThat(f.apply(createBuilder(c -> c.withSimplifyLimit(true))),
+        hasTree(expected));
+
+    // Case 2. Set sort, then offset, then fetch. Same effect as case 1.
+    final Function<RelBuilder, RelNode> f2 = b ->
+        b.scan("EMP")
+            .sort(b.field("DEPTNO")) // ORDER BY deptno
+            .limit(2, -1) // OFFSET 2
+            .limit(-1, 3) // LIMIT 3
+            .build();
+    assertThat(f2.apply(createBuilder()), hasTree(expected));
+    assertThat(f2.apply(createBuilder(c -> c.withSimplifyLimit(true))),
+        hasTree(expected));
+
+    // Case 3. Set sort, then fetch, then offset. Same effect as case 1 & 2.
+    final Function<RelBuilder, RelNode> f3 = b ->
+        b.scan("EMP")
+            .sort(b.field("DEPTNO")) // ORDER BY deptno
+            .limit(-1, 3) // LIMIT 3
+            .limit(2, -1) // OFFSET 2
+            .build();
+    assertThat(f3.apply(createBuilder()), hasTree(expected));
+    assertThat(f3.apply(createBuilder(c -> c.withSimplifyLimit(true))),
+        hasTree(expected));
+  }
+
+  /** Test case for
    * <a href="https://issues.apache.org/jira/browse/CALCITE-1610">[CALCITE-1610]
    * RelBuilder sort-combining optimization treats aliases incorrectly</a>. */
   @Test void testSortOverProjectSort() {
@@ -3903,6 +4010,70 @@ public class RelBuilderTest {
         + "    " + expectedIncludeNulls.replace("\n  ", "\n      ");
     assertThat(f.apply(createBuilder(), true), hasTree(expectedIncludeNulls));
     assertThat(f.apply(createBuilder(), false), hasTree(expectedExcludeNulls));
+  }
+
+  @Test void testSample() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   TABLESAMPLE SYSTEM(40)
+    final Function<RelBuilder, RelNode> f =
+        b -> b.scan("EMP")
+            .sample(false, new BigDecimal("0.4"), null)
+            .build();
+    final String expected = ""
+        + "Sample(mode=[system], rate=[0.4], repeatableSeed=[-])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+  }
+
+  @Test void testSampleBernoulliRepeatable() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   TABLESAMPLE BERNOULLI(25, 31415926)
+    final Function<RelBuilder, RelNode> f =
+        b -> b.scan("EMP")
+            .sample(true, new BigDecimal("0.25"), 31_415_926)
+            .build();
+    final String expected = ""
+        + "Sample(mode=[bernoulli], rate=[0.25], repeatableSeed=[31415926])\n"
+        + "  LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder()), hasTree(expected));
+  }
+
+  /** Tests that TABLESAMPLE(0) returns zero rows. */
+  @Test void testSampleZero() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   TABLESAMPLE SYSTEM(0)
+    final BiFunction<RelBuilder, Boolean, RelNode> f =
+        (b, mode) -> b.scan("EMP")
+            .sample(mode, BigDecimal.ZERO, null)
+            .build();
+    final String expected = "LogicalValues(tuples=[[]])\n";
+    assertThat(f.apply(createBuilder(), true), hasTree(expected));
+    assertThat(f.apply(createBuilder(), false), hasTree(expected));
+  }
+
+  /** Tests that TABLESAMPLE(100) (rate=1.0) does no sampling. */
+  @Test void testSampleAll() {
+    // Equivalent SQL:
+    //   SELECT *
+    //   FROM emp
+    //   TABLESAMPLE SYSTEM(100)
+    // becomes
+    //   SELECT *
+    //   FROM emp
+    final BiFunction<RelBuilder, Boolean, RelNode> f =
+        (b, mode) -> b.scan("EMP")
+            .sample(mode, BigDecimal.ONE, null)
+            .build();
+    final String expected = ""
+        + "LogicalTableScan(table=[[scott, EMP]])\n";
+    assertThat(f.apply(createBuilder(), true), hasTree(expected));
+    assertThat(f.apply(createBuilder(), false), hasTree(expected));
   }
 
   @Test void testMatchRecognize() {

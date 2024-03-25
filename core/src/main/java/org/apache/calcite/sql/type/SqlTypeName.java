@@ -65,11 +65,15 @@ public enum SqlTypeName {
   DATE(PrecScale.NO_NO, false, Types.DATE, SqlTypeFamily.DATE),
   TIME(PrecScale.NO_NO | PrecScale.YES_NO, false, Types.TIME,
       SqlTypeFamily.TIME),
-  TIME_WITH_LOCAL_TIME_ZONE(PrecScale.NO_NO | PrecScale.YES_NO, false, Types.OTHER,
+  TIME_WITH_LOCAL_TIME_ZONE(PrecScale.NO_NO | PrecScale.YES_NO, false, Types.TIME,
+      SqlTypeFamily.TIME),
+  TIME_TZ(PrecScale.NO_NO | PrecScale.YES_NO, false, Types.TIME,
       SqlTypeFamily.TIME),
   TIMESTAMP(PrecScale.NO_NO | PrecScale.YES_NO, false, Types.TIMESTAMP,
       SqlTypeFamily.TIMESTAMP),
   TIMESTAMP_WITH_LOCAL_TIME_ZONE(PrecScale.NO_NO | PrecScale.YES_NO, false,
+      Types.TIMESTAMP, SqlTypeFamily.TIMESTAMP),
+  TIMESTAMP_TZ(PrecScale.NO_NO | PrecScale.YES_NO, false,
       Types.TIMESTAMP, SqlTypeFamily.TIMESTAMP),
   INTERVAL_YEAR(PrecScale.NO_NO, false, Types.OTHER,
       SqlTypeFamily.INTERVAL_YEAR_MONTH),
@@ -127,6 +131,7 @@ public enum SqlTypeName {
    * do not flag it 'special' (internal). */
   GEOMETRY(PrecScale.NO_NO, false, ExtraSqlTypes.GEOMETRY, SqlTypeFamily.GEO),
   MEASURE(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.ANY),
+  FUNCTION(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.FUNCTION),
   SARG(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.ANY);
 
   public static final int MAX_DATETIME_PRECISION = 3;
@@ -137,7 +142,7 @@ public enum SqlTypeName {
   public static final int DEFAULT_INTERVAL_START_PRECISION = 2;
   public static final int DEFAULT_INTERVAL_FRACTIONAL_SECOND_PRECISION = 6;
   public static final int MIN_INTERVAL_START_PRECISION = 1;
-  public static final int MIN_INTERVAL_FRACTIONAL_SECOND_PRECISION = 1;
+  public static final int MIN_INTERVAL_FRACTIONAL_SECOND_PRECISION = 0;
   public static final int MAX_INTERVAL_START_PRECISION = 10;
   public static final int MAX_INTERVAL_FRACTIONAL_SECOND_PRECISION = 9;
 
@@ -158,7 +163,8 @@ public enum SqlTypeName {
           INTERVAL_DAY, INTERVAL_DAY_HOUR, INTERVAL_DAY_MINUTE,
           INTERVAL_DAY_SECOND, INTERVAL_HOUR, INTERVAL_HOUR_MINUTE,
           INTERVAL_HOUR_SECOND, INTERVAL_MINUTE, INTERVAL_MINUTE_SECOND,
-          INTERVAL_SECOND, TIME_WITH_LOCAL_TIME_ZONE, TIMESTAMP_WITH_LOCAL_TIME_ZONE,
+          INTERVAL_SECOND, TIME_WITH_LOCAL_TIME_ZONE, TIME_TZ,
+          TIMESTAMP_WITH_LOCAL_TIME_ZONE, TIMESTAMP_TZ,
           FLOAT, MULTISET, DISTINCT, STRUCTURED, ROW, CURSOR, COLUMN_LIST);
 
   public static final List<SqlTypeName> BOOLEAN_TYPES =
@@ -192,8 +198,13 @@ public enum SqlTypeName {
       ImmutableList.of(GEOMETRY);
 
   public static final List<SqlTypeName> DATETIME_TYPES =
-      ImmutableList.of(DATE, TIME, TIME_WITH_LOCAL_TIME_ZONE,
-          TIMESTAMP, TIMESTAMP_WITH_LOCAL_TIME_ZONE);
+      ImmutableList.of(DATE, TIME, TIME_WITH_LOCAL_TIME_ZONE, TIME_TZ,
+          TIMESTAMP, TIMESTAMP_WITH_LOCAL_TIME_ZONE, TIMESTAMP_TZ);
+
+  /** Types that contain time zone information. */
+  public static final List<SqlTypeName> TZ_TYPES =
+      ImmutableList.of(TIME_WITH_LOCAL_TIME_ZONE, TIME_TZ,
+          TIMESTAMP_WITH_LOCAL_TIME_ZONE, TIMESTAMP_TZ);
 
   public static final Set<SqlTypeName> YEAR_INTERVAL_TYPES =
       Sets.immutableEnumSet(SqlTypeName.INTERVAL_YEAR,
@@ -308,7 +319,12 @@ public enum SqlTypeName {
    * matches the given name, or throws {@link IllegalArgumentException}; never
    * returns null. */
   public static SqlTypeName lookup(String tag) {
-    String tag2 = tag.replace(' ', '_');
+    // Special handling for TIME WITH TIME ZONE and
+    // TIMESTAMP WITH TIME ZONE, whose type names are TIME_TZ and TIMESTAMP_TZ.
+    // We know that the type name is always uppercase, because it is
+    // inserted in the tag by the parser.
+    final String tag1 = tag.replace("WITH TIME ZONE", "TZ");
+    final String tag2 = tag1.replace(' ', '_');
     return valueOf(tag2);
   }
 
@@ -338,7 +354,7 @@ public enum SqlTypeName {
    * true</code>, because the VARCHAR type allows a precision parameter, as in
    * <code>VARCHAR(10)</code>.</li>
    * <li><code>Varchar.allowsPrecScale(true, true)</code> returns <code>
-   * true</code>, because the VARCHAR type does not allow a precision and a
+   * false</code>, because the VARCHAR type does not allow a precision and a
    * scale parameter, as in <code>VARCHAR(10, 4)</code>.</li>
    * <li><code>allowsPrecScale(false, true)</code> returns <code>false</code>
    * for every type.</li>
@@ -775,8 +791,10 @@ public enum SqlTypeName {
     case BINARY:
     case TIME:
     case TIME_WITH_LOCAL_TIME_ZONE:
+    case TIME_TZ:
     case TIMESTAMP:
     case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+    case TIMESTAMP_TZ:
       return 1;
     case INTERVAL_YEAR:
     case INTERVAL_YEAR_MONTH:

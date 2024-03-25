@@ -39,8 +39,8 @@ Unpack the source distribution `.tar.gz` file,
 then build using Gradle:
 
 {% highlight bash %}
-$ tar xvfz apache-calcite-1.34.0-src.tar.gz
-$ cd apache-calcite-1.34.0-src
+$ tar xvfz apache-calcite-1.36.0-src.tar.gz
+$ cd apache-calcite-1.36.0-src
 $ gradle build
 {% endhighlight %}
 
@@ -58,7 +58,7 @@ Create a local copy of the GitHub repository,
 then build using the included Gradle wrapper:
 
 {% highlight bash %}
-$ git clone git://github.com/apache/calcite.git
+$ git clone https://github.com/apache/calcite.git
 $ cd calcite
 $ ./gradlew build
 {% endhighlight %}
@@ -329,7 +329,10 @@ See the [tutorial]({{ site.baseurl }}/docs/tutorial.html).
 First, download and install Calcite,
 and <a href="https://www.mongodb.org/downloads">install MongoDB</a>.
 
-Note: you can use MongoDB from the integration test virtual machine above.
+Note:
+* You can use MongoDB from the integration test virtual machine above.
+* The MongoDB adapter is not suited for querying nested documents.
+* The MongoDB adapter currently only supports a very limited set of filter push downs.
 
 Import MongoDB's zipcode data set into MongoDB:
 
@@ -634,7 +637,11 @@ manager);
  * mark the appropriate version (e.g., 1.20.0) in the "Fix version" field;
  * add a comment (e.g., "Fixed in ...") with a hyperlink pointing to the commit
 which resolves the issue (in GitHub or GitBox), and also thank the contributor
-for their contribution.
+for their contribution ("thank you" can be omitted
+if the contributor is already a commiter).
+The hyperlink provided should be with respect to the main
+branch.  You should be able to identify the commit by browsing
+<https://github.com/apache/calcite/commits/main/>.
 
 ## Set up PGP signing keys
 
@@ -675,16 +682,18 @@ asfGitSourceUsername=
 asfGitSourcePassword=
 {% endhighlight %}
 
-Note: Both `asfNexusUsername` and `asfSvnUsername` are your apache id with `asfNexusPassword` and
+Note:
+* Both `asfNexusUsername` and `asfSvnUsername` are your apache id with `asfNexusPassword` and
 `asfSvnPassword` are corresponding password.
+* Git source account can be configured to either Gitbox (the default) or Github. For Gitbox, `asfGitSourceUsername`
+is your apache id, and `asfGitSourcePassword` is the corresponding password. For Github, `asfGitSourceUsername`
+is your GitHub id while `asfGitSourcePassword` is not your GitHub password, you need to generate it in
+https://github.com/settings/tokens choosing `Personal access tokens`.
 
 When
 [asflike-release-environment](https://github.com/vlsi/asflike-release-environment)
 is used, the credentials are taken from
 `asfTest...` (e.g. `asfTestNexusUsername=test`)
-
-Note: `asfGitSourceUsername` is your GitHub id while `asfGitSourcePassword` is not your GitHub password.
-You need to generate it in https://github.com/settings/tokens choosing `Personal access tokens`.
 
 Note: if you want to use `gpg-agent`, you need to pass some more properties:
 
@@ -754,15 +763,16 @@ Before you start:
   a fix version assigned (most likely the version we are
   just about to release)
 
-Generate a list of contributors by running the following (changing the
-date literal to the date of the previous release):
+Generate a list of contributors:
 ```
+# Commits since 1.35
+range=calcite-1.35.0..HEAD
 # distinct authors
-./sqlsh "select distinct author from git_commits where author_timestamp > DATE '2021-06-03' order by 1"
+git log --abbrev-commit --pretty=format:'%aN,' $range | sort -u
 # most prolific authors
-./sqlsh "select author, count(*) from git_commits where commit_timestamp > DATE '2021-06-03' group by author order by 2"
-# number of commits, distinct authors, and JIRA cases
-./sqlsh "select count(*) as c, count(distinct author) as a, count(*) filter (where message like '%CALCITE-%') as j from git_commits where commit_timestamp > DATE '2021-06-03' order by 1"
+git log --abbrev-commit --pretty=format:'%aN' $range | sort | uniq -c | sort -nr
+# number of JIRA cases
+git log --abbrev-commit --pretty=format:'%f' $range | awk -F- '$1 == "CALCITE" {print $2}' | sort -u | wc
 ```
 
 Smoke-test `sqlline` with Spatial and Oracle function tables:
@@ -806,6 +816,7 @@ git clean -xn
 ./gradlew prepareVote -Prc=0
 
 # Push release candidate to ASF servers
+# If you prefer to use Github account, change pushRepositoryProvider to GITHUB
 ./gradlew prepareVote -Prc=0 -Pasf -Pasf.git.pushRepositoryProvider=GITBOX
 {% endhighlight %}
 
@@ -927,12 +938,6 @@ thread to discuss.
 Julian
 {% endhighlight %}
 
-Use the [Apache URL shortener](https://s.apache.org) to generate
-shortened URLs for the vote proposal and result emails. Examples:
-[s.apache.org/calcite-1.2-vote](https://s.apache.org/calcite-1.2-vote) and
-[s.apache.org/calcite-1.2-result](https://s.apache.org/calcite-1.2-result).
-
-
 ## Publishing a release
 
 After a successful release vote, we need to push the release
@@ -948,6 +953,7 @@ Remember that UTC date changes at 4 pm Pacific time.
 ./gradlew publishDist -Prc=0
 
 # Publish the release to ASF servers
+# If you prefer to use Github account, change pushRepositoryProvider to GITHUB
 ./gradlew publishDist -Prc=0 -Pasf -Pasf.git.pushRepositoryProvider=GITBOX
 {% endhighlight %}
 
@@ -955,6 +961,15 @@ If for whatever reason the `publishDist` task fails
 (e.g. [failed to release nexus repository](https://github.com/vlsi/vlsi-release-plugins/issues/64),
 it is still possible to perform the publishing tasks manually. Ask for help in the dev list if
 you are not sure what needs to be done.
+
+If the `releaseRepository` task prints something like:
+{% highlight text%}
+> Task :releaseRepository
+Initialized stagingRepositoryId orgapachecalcite-1219 for repository nexus
+GET request failed. 404: Not Found, body: [errors:[[id:*, msg:No such repository: orgapachecalcite-1219]]]
+Requested operation was executed successfully in attempt 83 (maximum allowed 601)
+{% endhighlight %}
+it's most likely that the repository has been successfully released, you can check it in [ASF Nexus](https://repository.apache.org/).
 
 Svnpubsub will publish to the
 [release repo](https://dist.apache.org/repos/dist/release/calcite) and propagate to the
@@ -983,7 +998,9 @@ Add a release announcement by copying
 [site/_posts/2016-10-12-release-1.10.0.md]({{ site.sourceRoot }}/site/_posts/2016-10-12-release-1.10.0.md),
 and adapt the release date in `history.md` if necessary. Preview the changes locally, by following the
 instructions in [site/README.md]({{ site.sourceRoot }}/site/README.md), and then commit and push
-the changes to the `main` branch.
+the changes to the `main` branch. Please note that due to [CALCITE-5584](https://issues.apache.org/jira/browse/CALCITE-5584),
+the commit should be pushed to Github as the last commit, do not chain it with "Prepare for next development iteration"
+commit.
 
 Ensure that all changes to the website (news, release notes, javadoc) are correctly displayed.
 

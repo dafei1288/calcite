@@ -101,6 +101,54 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     sql(sql).ok();
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-3679">[CALCITE-3679]
+   * Allow lambda expressions in SQL queries</a>. */
+  @Test void testLambdaExpression() {
+    final String sql = "select higher_order_function(1, (x, y) -> y + 1)";
+    fixture()
+        .withFactory(c ->
+            c.withOperatorTable(t -> MockSqlOperatorTable.standard().extend()))
+        .withSql(sql)
+        .ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-3679">[CALCITE-3679]
+   * Allow lambda expressions in SQL queries</a>. */
+  @Test void testLambdaExpression2() {
+    final String sql = "select higher_order_function2(1, () -> -1)";
+    fixture()
+        .withFactory(c ->
+            c.withOperatorTable(t -> MockSqlOperatorTable.standard().extend()))
+        .withSql(sql)
+        .ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-3679">[CALCITE-3679]
+   * Allow lambda expressions in SQL queries</a>. */
+  @Test void testLambdaExpression3() {
+    final String sql = "select higher_order_function(deptno, (x, deptno) -> deptno + 1) from emp";
+    fixture()
+        .withFactory(c ->
+            c.withOperatorTable(t -> MockSqlOperatorTable.standard().extend()))
+        .withSql(sql)
+        .ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6116">[CALCITE-6116]
+   * Add EXISTS function (enabled in Spark library)</a>. */
+  @Test void testExistsFunctionInSpark() {
+    final String sql = "select \"EXISTS\"(array(1,2,3), x -> false)";
+    fixture()
+        .withFactory(c ->
+            c.withOperatorTable(t -> SqlValidatorTest.operatorTableFor(SqlLibrary.SPARK)))
+        .withSql(sql)
+        .ok();
+  }
+
   @Test void testDotLiteralAfterRow() {
     final String sql = "select row(1,2).\"EXPR$1\" from emp";
     sql(sql).ok();
@@ -141,6 +189,14 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
 
   @Test void testIntervalExpression() {
     sql("select interval mgr hour as h from emp").ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6115">[CALCITE-6115]
+   * Interval type specifier with zero fractional second precision does not pass validation</a>.
+   */
+  @Test void testIntervalSecondNoFractionalPart() {
+    sql("select interval '1' second(1,0) as h from emp").ok();
   }
 
   @Test void testAliasList() {
@@ -611,6 +667,16 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     final String sql = "select deptno, group_id()\n"
         + "from emp\n"
         + "group by grouping sets (deptno, (), job)";
+    sql(sql).ok();
+  }
+
+  @Test void testRecursiveQuery() {
+    final String sql = "WITH RECURSIVE aux(i) AS (\n"
+        + "  VALUES (1)\n"
+        + "  UNION ALL\n"
+        + "  SELECT i+1 FROM aux WHERE i < 10\n"
+        + ")\n"
+        + "SELECT * FROM aux";
     sql(sql).ok();
   }
 
@@ -1522,6 +1588,14 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     sql(sql).ok();
   }
 
+  @Test void testSampleBernoulliWithRateZero() {
+    final String sql = "select *\n"
+        + "from (\n"
+        + "  select * from emp limit 10\n"
+        + ") as e tablesample bernoulli(0)";
+    sql(sql).ok();
+  }
+
   @Test void testSampleSystem() {
     final String sql =
         "select * from emp tablesample system(50) where empno > 5";
@@ -1533,6 +1607,15 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
         + " select * from emp as e tablesample system(10) repeatable(1)\n"
         + " join dept on e.deptno = dept.deptno\n"
         + ") tablesample system(50) repeatable(99)\n"
+        + "where empno > 5";
+    sql(sql).ok();
+  }
+
+  @Test void testSampleSystemWithRateZero() {
+    final String sql = "select * from (\n"
+        + " select * from emp as e\n"
+        + " join dept on e.deptno = dept.deptno\n"
+        + ") tablesample system(0)\n"
         + "where empno > 5";
     sql(sql).ok();
   }
@@ -2285,6 +2368,23 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
         + "from table(hop((select * from Shipments), descriptor(rowtime), "
         + "INTERVAL '1' MINUTE, INTERVAL '2' MINUTE))";
     sql(sql).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-5779">[CALCITE-5779]
+   * Implicit column alias for single-column table function should work</a>. */
+  @Test void testTableFunctionSingleColumnAlias() {
+    String sql = "select rmp1.i, rmp1, rmp2, rmp3.i, j\n"
+        + "from table(ramp(1)) as rmp1,\n"
+        + "table(ramp(1)) as rmp2,\n"
+        + "table(ramp(1)) as rmp3,\n"
+        + "table(ramp(1)) as rmp4(j)";
+    fixture()
+        .withFactory(c ->
+            c.withOperatorTable(t -> MockSqlOperatorTable.standard().extend()))
+        .withCatalogReader(MockCatalogReaderExtended::create)
+        .withSql(sql)
+        .ok();
   }
 
   @Test void testTableFunctionSessionWithSubQueryParam() {
@@ -3059,16 +3159,14 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     sql(sql).ok();
   }
 
-  @Disabled("CALCITE-985")
   @Test void testMerge() {
-    final String sql = "merge into emp as target\n"
-        + "using (select * from emp where deptno = 30) as source\n"
-        + "on target.empno = source.empno\n"
-        + "when matched then\n"
-        + "  update set sal = sal + source.sal\n"
-        + "when not matched then\n"
-        + "  insert (empno, deptno, sal)\n"
-        + "  values (source.empno, source.deptno, source.sal)";
+    final String sql = "merge into empnullables e\n"
+        + "using (select * from emp where deptno is null) t\n"
+        + "on e.empno = t.empno\n"
+        + "when matched then update\n"
+        + "set ename = t.ename, deptno = t.deptno, sal = t.sal * .1\n"
+        + "when not matched then insert (empno, ename, deptno, sal)\n"
+        + "values(t.empno, t.ename, 10, t.sal * .15)";
     sql(sql).ok();
   }
 
@@ -4659,6 +4757,23 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
   }
 
   /** Test case for:
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6013">[CALCITE-6013]
+   * Unnecessary measures added as projects during rel construction</a>.
+   */
+  @Test void testAvoidUnnecessaryMeasureProject() {
+    final String sql = "select deptno\n"
+        + "from empm\n"
+        + "group by deptno";
+    fixture()
+        .withFactory(c ->
+            c.withOperatorTable(t ->
+                SqlValidatorTest.operatorTableFor(SqlLibrary.CALCITE)))
+        .withCatalogReader(MockCatalogReaderExtended::create)
+        .withSql(sql)
+        .ok();
+  }
+
+  /** Test case for:
    * <a href="https://issues.apache.org/jira/browse/CALCITE-3310">[CALCITE-3310]
    * Approximate and exact aggregate calls are recognized as the same
    * during sql-to-rel conversion</a>.
@@ -4840,6 +4955,54 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     sql(sql).withTrim(true).ok();
   }
 
+  /**
+   * Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6199">[CALCITE-6199]
+   * Trim unused fields for SNAPSHOT and SAMPLE if table has VIRTUAL column</a>.
+   */
+  @Test void testTrimSnapshotOnTemporalTable1() {
+    // Test temporal table with virtual columns.
+    final String sql = "select D, E from VIRTUALCOLUMNS.VC_T1 "
+        + "for system_time as of TIMESTAMP '2011-01-02 00:00:00'";
+    sql(sql).withExtendedTester().withTrim(true).ok();
+  }
+
+  /**
+   * Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6199">[CALCITE-6199]
+   * Trim unused fields for SNAPSHOT and SAMPLE if table has VIRTUAL column</a>.
+   */
+  @Test void testTrimSnapshotOnTemporalTable2() {
+    // Test temporal table with virtual columns.
+    final String sql = "select * from VIRTUALCOLUMNS.VC_T1 "
+        + "for system_time as of TIMESTAMP '2011-01-02 00:00:00'";
+    sql(sql).withExtendedTester().withTrim(true).ok();
+  }
+
+  /**
+   * Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6199">[CALCITE-6199]
+   * Trim unused fields for SNAPSHOT and SAMPLE if table has VIRTUAL column</a>.
+   */
+  @Test void testTrimSampleOnTemporalTable1() {
+    // Test temporal table with virtual columns.
+    final String sql = "select D, E from VIRTUALCOLUMNS.VC_T1 "
+        + " tablesample bernoulli(50)";
+    sql(sql).withExtendedTester().withTrim(true).ok();
+  }
+
+  /**
+   * Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6199">[CALCITE-6199]
+   * Trim unused fields for SNAPSHOT and SAMPLE if table has VIRTUAL column</a>.
+   */
+  @Test void testTrimSampleOnTemporalTable2() {
+    // Test temporal table with virtual columns.
+    final String sql = "select * from VIRTUALCOLUMNS.VC_T1 "
+        + " tablesample bernoulli(50)";
+    sql(sql).withExtendedTester().withTrim(true).ok();
+  }
+
   @Test void testJoinWithOnConditionQuery() {
     String sql = ""
         + "SELECT emp.deptno, emp.sal\n"
@@ -4913,6 +5076,128 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
                 config.withIdentifierExpansion(false)))
         .withTrim(false)
         .ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>. */
+  @Test void testRemoveDistinctIfUnique1() {
+    final String sql = "SELECT\n"
+        + "    deptno,\n"
+        + "    COUNT(DISTINCT sal) as cds,\n"
+        + "    COUNT(sal) as cs,\n"
+        + "    SUM(DISTINCT sal) AS sds,\n"
+        + "    SUM(sal) AS ss\n"
+        + "FROM (\n"
+        + "    SELECT DISTINCT deptno, sal\n"
+        + "    FROM emp)\n"
+        + "GROUP BY deptno";
+    sql(sql)
+        .withConfig(c ->
+            c.addRelBuilderConfigTransform(c2 ->
+                c2.withRemoveRedundantDistinct(true))).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>. */
+  @Test void testRemoveDistinctIfUnique2() {
+    final String sql = "SELECT\n"
+        + "    COUNT(DISTINCT sal) as cds,\n"
+        + "    COUNT(sal) as cs,\n"
+        + "    SUM(DISTINCT sal) AS sds,\n"
+        + "    SUM(sal) AS ss\n"
+        + "FROM (\n"
+        + "    SELECT deptno, 1 as sal\n"
+        + "    FROM emp"
+        + "    GROUP BY deptno)"
+        + "GROUP BY deptno\n";
+    sql(sql)
+        .withConfig(c ->
+            c.addRelBuilderConfigTransform(c2 ->
+                c2.withRemoveRedundantDistinct(true))).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>. */
+  @Test void testRemoveDistinctIfUnique3() {
+    final String sql = "SELECT\n"
+        + "    COUNT(DISTINCT sal) as cds,\n"
+        + "    COUNT(sal) as cs,\n"
+        + "    SUM(DISTINCT sal) AS sds,\n"
+        + "    SUM(sal) AS ss\n"
+        + "FROM (\n"
+        + "    SELECT DISTINCT deptno, sal\n"
+        + "    FROM emp)\n";
+    sql(sql)
+        .withConfig(c ->
+            c.addRelBuilderConfigTransform(c2 ->
+                c2.withRemoveRedundantDistinct(true))).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>. */
+  @Test void testRemoveDistinctIfUnique4() {
+    final String sql = "SELECT\n"
+        + "    COUNT(DISTINCT sal) as cds,\n"
+        + "    COUNT(sal) as cs,\n"
+        + "    SUM(DISTINCT sal) AS sds,\n"
+        + "    SUM(sal) AS ss\n"
+        + "FROM (\n"
+        + "    SELECT deptno, sal\n"
+        + "    FROM emp"
+        + "    GROUP BY deptno, sal)"
+        + "GROUP BY deptno\n";
+    // Default save redundant distinct
+    sql(sql).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>. */
+  @Test void testRemoveDistinctIfUnique5() {
+    // empno is unique key
+    final String sql = "SELECT COUNT(DISTINCT empno)\n"
+        + "FROM emp\n";
+    // Default save redundant distinct
+    sql(sql)
+        .withConfig(c ->
+            c.addRelBuilderConfigTransform(c2 ->
+                c2.withRemoveRedundantDistinct(true))).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>.
+   * See {@link org.apache.calcite.test.catalog.MockCatalogReaderSimple#registerTableEmp}
+   * */
+  @Test void testRemoveDistinctIfUnique6() {
+    // empno is unique key in emp table
+    final String sql = "SELECT deptno, COUNT(DISTINCT empno)\n"
+        + "FROM emp\n"
+        + "GROUP BY deptno";
+    // Default save redundant distinct
+    sql(sql)
+        .withConfig(c ->
+            c.addRelBuilderConfigTransform(c2 ->
+                c2.withRemoveRedundantDistinct(true))).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6214">[CALCITE-6214]
+   * Remove DISTINCT in COUNT if field is unique</a>. */
+  @Test void testRemoveDistinctIfUnique7() {
+    // empno is unique key
+    final String sql = "SELECT deptno, COUNT(DISTINCT empno)\n"
+        + "FROM emp\n"
+        + "GROUP BY ROLLUP(deptno)";
+    // Default save redundant distinct
+    sql(sql)
+        .withConfig(c ->
+            c.addRelBuilderConfigTransform(c2 ->
+                c2.withRemoveRedundantDistinct(true))).ok();
   }
 
   /** Test case for

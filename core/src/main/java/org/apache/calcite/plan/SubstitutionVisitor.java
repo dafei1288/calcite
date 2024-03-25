@@ -53,6 +53,7 @@ import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.rex.RexVisitor;
 import org.apache.calcite.rex.RexVisitorImpl;
+import org.apache.calcite.runtime.PairList;
 import org.apache.calcite.sql.SqlAggFunction;
 import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
@@ -77,7 +78,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -1514,15 +1515,16 @@ public class SubstitutionVisitor {
       }
       // Add Project if the mapping breaks order of fields in GroupSet
       if (!Mappings.keepsOrdering(mapping)) {
-        final List<Integer> posList = new ArrayList<>();
         final int fieldCount = aggregate2.rowType.getFieldCount();
-        final List<Pair<Integer, Integer>> pairs = new ArrayList<>();
+        final PairList<Integer, Integer> pairs = PairList.of();
         final List<Integer> groupings = aggregate2.groupSet.toList();
         for (int i = 0; i < groupings.size(); i++) {
-          pairs.add(Pair.of(mapping.getTarget(groupings.get(i)), i));
+          pairs.add(mapping.getTarget(groupings.get(i)), i);
         }
-        Collections.sort(pairs);
-        pairs.forEach(pair -> posList.add(pair.right));
+        pairs.sort(
+            Comparator.<Map.Entry<Integer, Integer>>comparingInt(Map.Entry::getKey)
+                .thenComparingInt(Map.Entry::getValue));
+        final List<Integer> posList = new ArrayList<>(pairs.rightList());
         for (int i = posList.size(); i < fieldCount; i++) {
           posList.add(i);
         }
@@ -1744,7 +1746,7 @@ public class SubstitutionVisitor {
     if (list0.size() != list1.size()) {
       return false;
     }
-    for (MutableRel rel: list0) {
+    for (MutableRel rel : list0) {
       int index = list1.indexOf(rel);
       if (index == -1) {
         return false;
@@ -1764,7 +1766,7 @@ public class SubstitutionVisitor {
     final RexShuttle shuttle = getExpandShuttle(calc.program);
     final RexNode condition = shuttle.apply(calc.program.getCondition());
     final List<RexNode> projects = new ArrayList<>();
-    for (RexNode rex: shuttle.apply(calc.program.getProjectList())) {
+    for (RexNode rex : shuttle.apply(calc.program.getProjectList())) {
       projects.add(rex);
     }
     if (condition == null) {
@@ -1834,7 +1836,7 @@ public class SubstitutionVisitor {
   private static boolean referenceByMapping(
       RexNode joinCondition, List<RexNode>... projectsOfInputs) {
     List<RexNode> projects = new ArrayList<>();
-    for (List<RexNode> projectsOfInput: projectsOfInputs) {
+    for (List<RexNode> projectsOfInput : projectsOfInputs) {
       projects.addAll(projectsOfInput);
     }
 

@@ -424,8 +424,8 @@ public class EnumerableMergeJoin extends Join implements EnumerableRel {
     // We assume that the inputs are sorted. The price of sorting them has
     // already been paid. The cost of the join is therefore proportional to the
     // input and output size.
-    final double rightRowCount = right.estimateRowCount(mq);
-    final double leftRowCount = left.estimateRowCount(mq);
+    final double rightRowCount = mq.getRowCount(right);
+    final double leftRowCount = mq.getRowCount(left);
     final double rowCount = mq.getRowCount(this);
     final double d = leftRowCount + rightRowCount + rowCount;
     return planner.getCostFactory().makeCost(d, 0, 0);
@@ -492,7 +492,7 @@ public class EnumerableMergeJoin extends Join implements EnumerableRel {
               RelFieldCollation.NullDirection.LAST));
     }
     final RelCollation collation = RelCollations.of(fieldCollations);
-    final Expression comparator = leftKeyPhysType.generateComparator(collation);
+    final Expression comparator = leftKeyPhysType.generateMergeJoinComparator(collation);
 
     return implementor.result(
         physType,
@@ -512,6 +512,9 @@ public class EnumerableMergeJoin extends Join implements EnumerableRel {
                         ImmutableList.of(
                             leftResult.physType, rightResult.physType)),
                     Expressions.constant(EnumUtils.toLinq4jJoinType(joinType)),
-                    comparator))).toBlock());
+                    comparator,
+                    Util.first(
+                        leftKeyPhysType.comparer(),
+                        Expressions.constant(null))))).toBlock());
   }
 }

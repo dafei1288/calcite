@@ -195,6 +195,9 @@ public enum SqlKind {
   /** Item in WITH clause. */
   WITH_ITEM,
 
+  /** Represents a recursive CTE as a table ref. */
+  WITH_ITEM_TABLE_REF,
+
   /** Item expression. */
   ITEM,
 
@@ -400,6 +403,9 @@ public enum SqlKind {
   /** {@code CASE} expression. */
   CASE,
 
+  /** {@code LAMBDA} expression. */
+  LAMBDA,
+
   /** {@code INTERVAL} expression. */
   INTERVAL,
 
@@ -427,13 +433,16 @@ public enum SqlKind {
   /** The {@code CONCAT} function (Postgresql and MSSQL) that ignores NULL. */
   CONCAT_WITH_NULL,
 
+  /** The {@code CONCAT_WS} function (MSSQL). */
+  CONCAT_WS_MSSQL,
+
   /** The "IF" function (BigQuery, Hive, Spark). */
   IF,
 
   /** {@code LEAST} function (Oracle). */
   LEAST,
 
-  /** {@code DATE_DIFF} function (BigQuery Semantics). */
+  /** {@code DATE_ADD} function (BigQuery Semantics). */
   DATE_ADD,
 
   /** {@code DATE_TRUNC} function (BigQuery). */
@@ -619,6 +628,12 @@ public enum SqlKind {
    */
   LOCAL_REF,
 
+  /** Reference to lambda expression parameter.
+   *
+   * <p>(Only used at the RexNode level.)
+   */
+  LAMBDA_REF,
+
   /**
    * Reference to correlation variable.
    *
@@ -683,6 +698,9 @@ public enum SqlKind {
   /** {@code EXTRACT} function. */
   EXTRACT,
 
+  /** {@code ARRAY_APPEND} function (Spark semantics). */
+  ARRAY_APPEND,
+
   /** {@code ARRAY_COMPACT} function (Spark semantics). */
   ARRAY_COMPACT,
 
@@ -698,8 +716,14 @@ public enum SqlKind {
   /** {@code ARRAY_EXCEPT} function (Spark semantics). */
   ARRAY_EXCEPT,
 
+  /** {@code ARRAY_INSERT} function (Spark semantics). */
+  ARRAY_INSERT,
+
   /** {@code ARRAY_INTERSECT} function (Spark semantics). */
   ARRAY_INTERSECT,
+
+  /** {@code ARRAY_JOIN} function (Spark semantics). */
+  ARRAY_JOIN,
 
   /** {@code ARRAY_LENGTH} function (Spark semantics). */
   ARRAY_LENGTH,
@@ -709,6 +733,15 @@ public enum SqlKind {
 
   /** {@code ARRAY_MIN} function (Spark semantics). */
   ARRAY_MIN,
+
+  /** {@code ARRAY_POSITION} function (Spark semantics). */
+  ARRAY_POSITION,
+
+  /** {@code ARRAY_PREPEND} function (Spark semantics). */
+  ARRAY_PREPEND,
+
+  /** {@code ARRAY_REMOVE} function (Spark semantics). */
+  ARRAY_REMOVE,
 
   /** {@code ARRAY_REPEAT} function (Spark semantics). */
   ARRAY_REPEAT,
@@ -725,8 +758,17 @@ public enum SqlKind {
   /** {@code ARRAY_UNION} function (Spark semantics). */
   ARRAY_UNION,
 
+  /** {@code ARRAYS_OVERLAP} function (Spark semantics). */
+  ARRAYS_OVERLAP,
+
+  /** {@code ARRAYS_ZIP} function (Spark semantics). */
+  ARRAYS_ZIP,
+
   /** {@code SORT_ARRAY} function (Spark semantics). */
   SORT_ARRAY,
+
+  /** {@code MAP_CONCAT} function (Spark semantics). */
+  MAP_CONCAT,
 
   /** {@code MAP_ENTRIES} function (Spark semantics). */
   MAP_ENTRIES,
@@ -737,8 +779,23 @@ public enum SqlKind {
   /** {@code MAP_VALUES} function (Spark semantics). */
   MAP_VALUES,
 
+  /** {@code MAP_CONTAINS_KEY} function (Spark semantics). */
+  MAP_CONTAINS_KEY,
+
+  /** {@code MAP_FROM_ARRAYS} function (Spark semantics). */
+  MAP_FROM_ARRAYS,
+
+  /** {@code MAP_FROM_ENTRIES} function (Spark semantics). */
+  MAP_FROM_ENTRIES,
+
+  /** {@code STR_TO_MAP} function (Spark semantics). */
+  STR_TO_MAP,
+
   /** {@code REVERSE} function (SQL Server, MySQL). */
   REVERSE,
+
+  /** {@code SOUNDEX} function (Spark semantics). */
+  SOUNDEX_SPARK,
 
   /** {@code SUBSTR} function (BigQuery semantics). */
   SUBSTR_BIG_QUERY,
@@ -751,6 +808,15 @@ public enum SqlKind {
 
   /** {@code SUBSTR} function (PostgreSQL semantics). */
   SUBSTR_POSTGRESQL,
+
+  /** {@code CHAR_LENGTH} function. */
+  CHAR_LENGTH,
+
+  /** {@code ENDS_WITH} function. */
+  ENDS_WITH,
+
+  /** {@code STARTS_WITH} function. */
+  STARTS_WITH,
 
   /** Call to a function using JDBC function syntax. */
   JDBC_FN,
@@ -808,6 +874,9 @@ public enum SqlKind {
   /** {@code CURSOR} constructor, for example, <code>SELECT * FROM
    * TABLE(udx(CURSOR(SELECT ...), x, y, z))</code>. */
   CURSOR,
+
+  /** {@code CONTAINS_SUBSTR} function (BigQuery semantics). */
+  CONTAINS_SUBSTR,
 
   // internal operators (evaluated in validator) 200-299
 
@@ -1116,11 +1185,17 @@ public enum SqlKind {
   /** {@code CREATE TABLE} DDL statement. */
   CREATE_TABLE,
 
+  /** {@code CREATE TABLE LIKE} DDL statement. */
+  CREATE_TABLE_LIKE,
+
   /** {@code ALTER TABLE} DDL statement. */
   ALTER_TABLE,
 
   /** {@code DROP TABLE} DDL statement. */
   DROP_TABLE,
+
+  /** {@code TRUNCATE TABLE} DDL statement. */
+  TRUNCATE_TABLE,
 
   /** {@code CREATE VIEW} DDL statement. */
   CREATE_VIEW,
@@ -1233,7 +1308,8 @@ public enum SqlKind {
   public static final EnumSet<SqlKind> DDL =
       EnumSet.of(COMMIT, ROLLBACK, ALTER_SESSION,
           CREATE_SCHEMA, CREATE_FOREIGN_SCHEMA, DROP_SCHEMA,
-          CREATE_TABLE, ALTER_TABLE, DROP_TABLE,
+          CREATE_TABLE, CREATE_TABLE_LIKE,
+          ALTER_TABLE, DROP_TABLE, TRUNCATE_TABLE,
           CREATE_FUNCTION, DROP_FUNCTION,
           CREATE_VIEW, ALTER_VIEW, DROP_VIEW,
           CREATE_MATERIALIZED_VIEW, ALTER_MATERIALIZED_VIEW,

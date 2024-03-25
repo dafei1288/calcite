@@ -18,7 +18,6 @@ package org.apache.calcite.sql.fun;
 
 import org.apache.calcite.config.CalciteConnectionProperty;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
@@ -29,6 +28,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 import static java.util.Objects.requireNonNull;
 
@@ -71,6 +72,8 @@ public enum SqlLibrary {
   /** A collection of operators that are in PostgreSQL but not in standard
    * SQL. */
   POSTGRESQL("p", "postgresql"),
+  /** A collection of operators that are in Snowflake but not in standard SQL. */
+  SNOWFLAKE("f", "snowflake"),
   /** A collection of operators that are in Apache Spark but not in standard
    * SQL. */
   SPARK("s", "spark");
@@ -88,8 +91,7 @@ public enum SqlLibrary {
   SqlLibrary(String abbrev, String fun) {
     this.abbrev = requireNonNull(abbrev, "abbrev");
     this.fun = requireNonNull(fun, "fun");
-    Preconditions.checkArgument(
-        fun.equals(name().toLowerCase(Locale.ROOT).replace("_", "")));
+    checkArgument(fun.equals(name().toLowerCase(Locale.ROOT).replace("_", "")));
   }
 
   @SuppressWarnings("SwitchStatementWithTooFewBranches")
@@ -97,7 +99,7 @@ public enum SqlLibrary {
     switch (this) {
     case ALL:
       return ImmutableList.of(BIG_QUERY, CALCITE, HIVE, MSSQL, MYSQL, ORACLE,
-          POSTGRESQL, SPARK);
+          POSTGRESQL, SNOWFLAKE, SPARK);
     default:
       return ImmutableList.of();
     }

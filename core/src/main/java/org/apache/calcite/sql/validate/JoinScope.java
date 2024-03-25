@@ -22,6 +22,10 @@ import org.apache.calcite.sql.SqlWindow;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import static org.apache.calcite.sql.JoinType.LEFT_ANTI_JOIN;
+import static org.apache.calcite.sql.JoinType.LEFT_SEMI_JOIN;
+import static org.apache.calcite.sql.SqlUtil.stripAs;
+
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -66,6 +70,15 @@ public class JoinScope extends ListScope {
   @Override public void addChild(SqlValidatorNamespace ns, String alias,
       boolean nullable) {
     super.addChild(ns, alias, nullable);
+
+    // LEFT SEMI JOIN and LEFT ANTI JOIN can only come from Babel.
+    if ((join.getJoinType() == LEFT_SEMI_JOIN
+        || join.getJoinType() == LEFT_ANTI_JOIN)
+        && stripAs(join.getRight()) == ns.getNode()) {
+      // Ignore the right hand side.
+      return;
+    }
+
     if ((usingScope != null) && (usingScope != parent)) {
       // We're looking at a join within a join. Recursively add this
       // child to its parent scope too. Example:

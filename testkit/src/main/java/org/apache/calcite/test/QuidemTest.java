@@ -16,7 +16,6 @@
  */
 package org.apache.calcite.test;
 
-import org.apache.calcite.adapter.java.ReflectiveSchema;
 import org.apache.calcite.avatica.AvaticaUtils;
 import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.calcite.jdbc.CalciteConnection;
@@ -39,6 +38,7 @@ import com.google.common.io.PatternFilenameFilter;
 import net.hydromatic.quidem.CommandHandler;
 import net.hydromatic.quidem.Quidem;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -61,6 +61,8 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.fail;
 
+import static java.util.Objects.requireNonNull;
+
 /**
  * Test that runs every Quidem file as a test.
  */
@@ -69,7 +71,7 @@ public abstract class QuidemTest {
 
   private static final Pattern PATTERN = Pattern.compile("\\.iq$");
 
-  private static Object getEnv(String varName) {
+  private static @Nullable Object getEnv(String varName) {
     switch (varName) {
     case "jdk18":
       return System.getProperty("java.version").startsWith("1.8");
@@ -99,7 +101,7 @@ public abstract class QuidemTest {
     }
   }
 
-  private Method findMethod(String path) {
+  private @Nullable Method findMethod(String path) {
     // E.g. path "sql/agg.iq" gives method "testSqlAgg"
     final String path1 = path.replace(File.separatorChar, '_');
     final String path2 = PATTERN.matcher(path1).replaceAll("");
@@ -113,11 +115,11 @@ public abstract class QuidemTest {
     return m;
   }
 
-  @SuppressWarnings("BetaApi")
+  @SuppressWarnings({"BetaApi", "UnstableApiUsage"})
   protected static Collection<String> data(String first) {
     // inUrl = "file:/home/fred/calcite/core/target/test-classes/sql/agg.iq"
     final URL inUrl = QuidemTest.class.getResource("/" + n2u(first));
-    final File firstFile = Sources.of(inUrl).file();
+    final File firstFile = Sources.of(requireNonNull(inUrl, "inUrl")).file();
     final int commonPrefixLength = firstFile.getAbsolutePath().length() - first.length();
     final File dir = firstFile.getParentFile();
     final List<String> paths = new ArrayList<>();
@@ -137,11 +139,14 @@ public abstract class QuidemTest {
       inFile = f;
       outFile = new File(path + ".out");
     } else {
-      // e.g. path = "sql/outer.iq"
-      // inUrl = "file:/home/fred/calcite/core/target/test-classes/sql/outer.iq"
+      // e.g. path = "sql/agg.iq"
+      // inUrl = "file:/home/fred/calcite/core/build/resources/test/sql/agg.iq"
+      // inFile = "/home/fred/calcite/core/build/resources/test/sql/agg.iq"
+      // outDir = "/home/fred/calcite/core/build/quidem/test/sql"
+      // outFile = "/home/fred/calcite/core/build/quidem/test/sql/agg.iq"
       final URL inUrl = QuidemTest.class.getResource("/" + n2u(path));
-      inFile = Sources.of(inUrl).file();
-      outFile = new File(inFile.getAbsoluteFile().getParent(), u2n("surefire/") + path);
+      inFile = Sources.of(requireNonNull(inUrl, "inUrl")).file();
+      outFile = replaceDir(inFile, "resources", "quidem");
     }
     Util.discard(outFile.getParentFile().mkdirs());
     try (Reader reader = Util.reader(inFile);
@@ -172,11 +177,27 @@ public abstract class QuidemTest {
           .build();
       new Quidem(config).execute();
     }
+    // Sanity check: we do not allow an empty input file, it may indicate that it was overwritten
+    if (inFile.length() == 0) {
+      fail("Input file was empty: " + inFile + "\n");
+    }
     final String diff = DiffTestCase.diff(inFile, outFile);
     if (!diff.isEmpty()) {
       fail("Files differ: " + outFile + " " + inFile + "\n"
           + diff);
     }
+  }
+
+  /** Returns a file, replacing one directory with another.
+   *
+   * <p>For example, {@code replaceDir("/abc/str/astro.txt", "str", "xyz")}
+   * returns "{@code "/abc/xyz/astro.txt}".
+   * Note that the file name "astro.txt" does not become "axyzo.txt".
+   */
+  private static File replaceDir(File file, String target, String replacement) {
+    return new File(
+        n2u(file.getAbsolutePath()).replace(n2u('/' + target + '/'),
+            n2u('/' + replacement + '/')));
   }
 
   /** Creates a command handler. */
@@ -189,14 +210,8 @@ public abstract class QuidemTest {
     return new QuidemConnectionFactory();
   }
 
-  /** Converts a path from Unix to native. On Windows, converts
-   * forward-slashes to back-slashes; on Linux, does nothing. */
-  private static String u2n(String s) {
-    return File.separatorChar == '\\'
-        ? s.replace('/', '\\')
-        : s;
-  }
-
+  /** Converts a path from native to Unix. On Windows, converts
+   * back-slashes to forward-slashes; on Linux, does nothing. */
   private static String n2u(String s) {
     return File.separatorChar == '\\'
         ? s.replace('\\', '/')
@@ -253,6 +268,10 @@ public abstract class QuidemTest {
       case "hr":
         return CalciteAssert.hr()
             .connect();
+      case "aux":
+        return CalciteAssert.hr()
+            .with(CalciteAssert.Config.AUX)
+            .connect();
       case "foodmart":
         return CalciteAssert.that()
             .with(CalciteAssert.Config.FOODMART_CLONE)
@@ -286,6 +305,12 @@ public abstract class QuidemTest {
             .with(CalciteAssert.Config.REGULAR)
             .with(CalciteAssert.SchemaSpec.POST)
             .connect();
+      case "sparkfunc":
+        return CalciteAssert.that()
+            .with(CalciteConnectionProperty.FUN, "spark")
+            .with(CalciteAssert.Config.REGULAR)
+            .with(CalciteAssert.SchemaSpec.POST)
+            .connect();
       case "oraclefunc":
         return CalciteAssert.that()
             .with(CalciteConnectionProperty.FUN, "oracle")
@@ -300,7 +325,7 @@ public abstract class QuidemTest {
         return CalciteAssert.that()
             .with(CalciteConnectionProperty.TIME_ZONE, "UTC")
             .withSchema("s",
-                new ReflectiveSchema(
+                new ReflectiveSchemaWithoutRowCount(
                     new CatchallSchema()))
             .connect();
       case "orinoco":

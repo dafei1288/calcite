@@ -51,6 +51,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.calcite.util.ReflectUtil.isStatic;
+
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -76,13 +78,11 @@ public class JavaTypeFactoryImpl
   @Override public RelDataType createStructType(Class type) {
     final List<RelDataTypeField> list = new ArrayList<>();
     for (Field field : type.getFields()) {
-      if (!Modifier.isStatic(field.getModifiers())) {
+      if (!isStatic(field)) {
         // FIXME: watch out for recursion
         final Type fieldType = fieldType(field);
         list.add(
-            new RelDataTypeFieldImpl(
-                field.getName(),
-                list.size(),
+            new RelDataTypeFieldImpl(field.getName(), list.size(),
                 createType(fieldType)));
       }
     }
@@ -180,6 +180,7 @@ public class JavaTypeFactoryImpl
       case DATE:
       case TIME:
       case TIME_WITH_LOCAL_TIME_ZONE:
+      case TIME_TZ:
       case INTEGER:
       case INTERVAL_YEAR:
       case INTERVAL_YEAR_MONTH:
@@ -187,6 +188,7 @@ public class JavaTypeFactoryImpl
         return type.isNullable() ? Integer.class : int.class;
       case TIMESTAMP:
       case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+      case TIMESTAMP_TZ:
       case BIGINT:
       case INTERVAL_DAY:
       case INTERVAL_DAY_HOUR:

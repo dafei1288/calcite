@@ -20,15 +20,23 @@ import org.apache.calcite.avatica.util.TimeUnitRange;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeComparability;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlCallBinding;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlIntervalQualifier;
+import org.apache.calcite.sql.SqlLambda;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperandCountRange;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.SqlOperatorBinding;
 import org.apache.calcite.sql.SqlUtil;
+import org.apache.calcite.sql.util.SqlBasicVisitor;
+import org.apache.calcite.sql.validate.SqlLambdaScope;
+import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorScope;
 import org.apache.calcite.util.ImmutableIntList;
+import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
 import com.google.common.collect.ImmutableList;
@@ -48,6 +56,7 @@ import java.util.function.Predicate;
 
 import static com.google.common.base.Preconditions.checkArgument;
 
+import static org.apache.calcite.sql.type.NonNullableAccessors.getKeyTypeOrThrow;
 import static org.apache.calcite.util.Static.RESOURCE;
 
 import static java.util.Objects.requireNonNull;
@@ -98,6 +107,27 @@ public abstract class OperandTypes {
    */
   public static FamilyOperandTypeChecker family(List<SqlTypeFamily> families) {
     return family(families, i -> false);
+  }
+
+  /**
+   * Creates a checker that passes if the operand is a function with
+   * a given return type and parameter types. This method can be used
+   * to check a lambda expression.
+   */
+  public static SqlSingleOperandTypeChecker function(SqlTypeFamily returnTypeFamily,
+      SqlTypeFamily... paramTypeFamilies) {
+    return new LambdaFamilyOperandTypeChecker(
+        returnTypeFamily, ImmutableList.copyOf(paramTypeFamilies));
+  }
+
+  /**
+   * Creates a checker that passes if the operand is a function with
+   * a given return type and parameter types. This method can be used
+   * to check a lambda expression.
+   */
+  public static SqlSingleOperandTypeChecker function(SqlTypeFamily returnTypeFamily,
+      List<SqlTypeFamily> paramTypeFamilies) {
+    return new LambdaFamilyOperandTypeChecker(returnTypeFamily, paramTypeFamilies);
   }
 
   /**
@@ -237,6 +267,18 @@ public abstract class OperandTypes {
   }
 
   /**
+   * Creates an operand checker from a sequence of single-operand checkers,
+   * generating the signature from the components.
+   */
+  public static SqlOperandTypeChecker sequence(
+      BiFunction<SqlOperator, String, String> signatureGenerator,
+      SqlSingleOperandTypeChecker... rules) {
+    return new CompositeOperandTypeChecker(
+        CompositeOperandTypeChecker.Composition.SEQUENCE,
+        ImmutableList.copyOf(rules), null, signatureGenerator, null);
+  }
+
+  /**
    * Creates a checker that passes if all of the rules pass for each operand,
    * using a given operand count strategy.
    */
@@ -364,6 +406,16 @@ public abstract class OperandTypes {
           // Second operand optional (operand index 0, 1)
           number -> number == 1);
 
+  public static final SqlOperandTypeChecker NUMERIC_INT32 =
+      sequence(
+          (operator, name) -> operator.getName() + "(<NUMERIC>, <INTEGER>)",
+          family(SqlTypeFamily.NUMERIC),
+          // Only 32-bit integer allowed for the second argument
+          new TypeNameChecker(SqlTypeName.INTEGER));
+
+  public static final SqlSingleOperandTypeChecker NUMERIC_CHARACTER =
+      family(SqlTypeFamily.NUMERIC, SqlTypeFamily.CHARACTER);
+
   public static final SqlSingleOperandTypeChecker NUMERIC_INTEGER =
       family(SqlTypeFamily.NUMERIC, SqlTypeFamily.INTEGER);
 
@@ -403,6 +455,13 @@ public abstract class OperandTypes {
               SqlTypeFamily.STRING),
           // Third operand optional (operand index 0, 1, 2)
           number -> number == 2);
+
+  public static final FamilyOperandTypeChecker STRING_OPTIONAL_STRING_OPTIONAL_STRING =
+      family(
+          ImmutableList.of(SqlTypeFamily.STRING, SqlTypeFamily.STRING,
+              SqlTypeFamily.STRING),
+          // Second and Third operand both are optional (operand index 0, 1, 2)
+          number -> number == 1 || number == 2);
 
   public static final FamilyOperandTypeChecker STRING_NUMERIC_OPTIONAL_STRING =
       family(
@@ -469,6 +528,9 @@ public abstract class OperandTypes {
   public static final SqlSingleOperandTypeChecker ARRAY =
       family(SqlTypeFamily.ARRAY);
 
+  public static final SqlSingleOperandTypeChecker ARRAY_ARRAY =
+      family(SqlTypeFamily.ARRAY, SqlTypeFamily.ARRAY);
+
   public static final SqlSingleOperandTypeChecker ARRAY_OR_MAP =
       OperandTypes.family(SqlTypeFamily.ARRAY)
           .or(OperandTypes.family(SqlTypeFamily.MAP))
@@ -500,6 +562,38 @@ public abstract class OperandTypes {
         }
       };
 
+  public static final SqlSingleOperandTypeChecker ARRAY_OF_INTEGER =
+      new FamilyOperandTypeChecker(ImmutableList.of(SqlTypeFamily.ARRAY), i -> false) {
+        @Override public boolean checkSingleOperandType(SqlCallBinding callBinding, SqlNode operand,
+            int iFormalOperand, SqlTypeFamily family, boolean throwOnFailure) {
+          if (!super.checkSingleOperandType(
+              callBinding,
+              operand,
+              iFormalOperand,
+              family,
+              throwOnFailure)) {
+            return false;
+          }
+          RelDataType type = SqlTypeUtil.deriveType(callBinding, operand);
+          if (SqlTypeUtil.isNull(type)) {
+            return true;
+          }
+          RelDataType componentType =
+              requireNonNull(type.getComponentType(), "componentType");
+          if (SqlTypeUtil.isIntType(componentType) || SqlTypeUtil.isNull(componentType)) {
+            return true;
+          }
+
+          if (throwOnFailure) {
+            throw callBinding.newValidationSignatureError();
+          }
+          return false;
+        }
+
+        @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+          return opName + "(<INTEGER ARRAY>)";
+        }
+      };
 
   /** Checks that returns whether a value is a multiset or an array.
    * Cf Java, where list and set are collections but a map is not. */
@@ -514,8 +608,31 @@ public abstract class OperandTypes {
   public static final SqlSingleOperandTypeChecker MAP =
       family(SqlTypeFamily.MAP);
 
+  public static final SqlOperandTypeChecker ARRAY_FUNCTION =
+      new ArrayFunctionOperandTypeChecker();
+
   public static final SqlOperandTypeChecker ARRAY_ELEMENT =
-      new ArrayElementOperandTypeChecker();
+      new ArrayElementOperandTypeChecker(true, true);
+
+  public static final SqlOperandTypeChecker ARRAY_ELEMENT_NONNULL =
+      new ArrayElementOperandTypeChecker(false, true);
+
+  /** Type checker that accepts an ARRAY as the first argument, but not
+   * an expression with type NULL (i.e. a NULL literal). */
+  public static final SqlOperandTypeChecker ARRAY_NONNULL =
+      family(SqlTypeFamily.ARRAY).and(new NotNullOperandTypeChecker(1, false));
+
+  public static final SqlOperandTypeChecker ARRAY_INSERT =
+      new ArrayInsertOperandTypeChecker();
+
+  public static final SqlSingleOperandTypeChecker MAP_FROM_ENTRIES =
+      new MapFromEntriesOperandTypeChecker();
+
+  public static final SqlSingleOperandTypeChecker MAP_FUNCTION =
+      new MapFunctionOperandTypeChecker();
+
+  public static final SqlOperandTypeChecker MAP_KEY =
+      new MapKeyOperandTypeChecker();
 
   /**
    * Operand type-checking strategy where type must be a literal or NULL.
@@ -530,6 +647,12 @@ public abstract class OperandTypes {
       new LiteralOperandTypeChecker(false);
 
   /**
+   * Operand type-checking strategy where all types must be non-NULL value.
+   */
+  public static final SqlSingleOperandTypeChecker NONNULL_NONNULL =
+      new NotNullOperandTypeChecker(2, false);
+
+  /**
    * Operand type-checking strategy type must be a boolean non-NULL literal.
    */
   public static final SqlSingleOperandTypeChecker BOOLEAN_LITERAL =
@@ -539,6 +662,7 @@ public abstract class OperandTypes {
             SqlCallBinding callBinding,
             SqlNode operand,
             int iFormalOperand,
+            SqlTypeFamily family,
             boolean throwOnFailure) {
           if (!LITERAL.checkSingleOperandType(
               callBinding,
@@ -552,6 +676,7 @@ public abstract class OperandTypes {
               callBinding,
               operand,
               iFormalOperand,
+              family,
               throwOnFailure)) {
             return false;
           }
@@ -583,14 +708,15 @@ public abstract class OperandTypes {
           i -> false) {
         @Override public boolean checkSingleOperandType(
             SqlCallBinding callBinding, SqlNode operand,
-            int iFormalOperand, boolean throwOnFailure) {
+            int iFormalOperand, SqlTypeFamily family,
+            boolean throwOnFailure) {
           if (iFormalOperand == 0) {
             return super.checkSingleOperandType(callBinding, operand,
-                iFormalOperand, throwOnFailure);
+                iFormalOperand, family, throwOnFailure);
           }
 
           return BOOLEAN_LITERAL.checkSingleOperandType(
-              callBinding, operand, 0, throwOnFailure);
+              callBinding, operand, iFormalOperand, throwOnFailure);
         }
       };
 
@@ -605,6 +731,7 @@ public abstract class OperandTypes {
             SqlCallBinding callBinding,
             SqlNode operand,
             int iFormalOperand,
+            SqlTypeFamily family,
             boolean throwOnFailure) {
           if (!LITERAL.checkSingleOperandType(
               callBinding,
@@ -618,6 +745,7 @@ public abstract class OperandTypes {
               callBinding,
               operand,
               iFormalOperand,
+              family,
               throwOnFailure)) {
             return false;
           }
@@ -660,14 +788,14 @@ public abstract class OperandTypes {
           i -> false) {
         @Override public boolean checkSingleOperandType(
             SqlCallBinding callBinding, SqlNode operand,
-            int iFormalOperand, boolean throwOnFailure) {
+            int iFormalOperand, SqlTypeFamily family, boolean throwOnFailure) {
           if (!LITERAL.checkSingleOperandType(callBinding, operand,
-              iFormalOperand, throwOnFailure)) {
+              0, throwOnFailure)) {
             return false;
           }
 
           if (!super.checkSingleOperandType(callBinding, operand,
-              iFormalOperand, throwOnFailure)) {
+              iFormalOperand, family, throwOnFailure)) {
             return false;
           }
 
@@ -698,14 +826,14 @@ public abstract class OperandTypes {
           i -> false) {
         @Override public boolean checkSingleOperandType(
             SqlCallBinding callBinding, SqlNode operand,
-            int iFormalOperand, boolean throwOnFailure) {
+            int iFormalOperand, SqlTypeFamily family, boolean throwOnFailure) {
           if (iFormalOperand == 0) {
             return super.checkSingleOperandType(callBinding, operand,
-                iFormalOperand, throwOnFailure);
+                iFormalOperand, family, throwOnFailure);
           }
 
           return UNIT_INTERVAL_NUMERIC_LITERAL.checkSingleOperandType(
-              callBinding, operand, 0, throwOnFailure);
+              callBinding, operand, iFormalOperand, throwOnFailure);
         }
       };
 
@@ -806,6 +934,17 @@ public abstract class OperandTypes {
       family(SqlTypeFamily.STRING, SqlTypeFamily.STRING,
           SqlTypeFamily.INTEGER, SqlTypeFamily.INTEGER);
 
+  public static final SqlSingleOperandTypeChecker STRING_STRING_OPTIONAL_INTEGER_OPTIONAL_INTEGER =
+      family(
+          ImmutableList.of(SqlTypeFamily.STRING, SqlTypeFamily.STRING, SqlTypeFamily.INTEGER,
+              SqlTypeFamily.INTEGER), i -> i == 2 || i == 3);
+
+  public static final SqlSingleOperandTypeChecker
+      STRING_STRING_OPTIONAL_INTEGER_OPTIONAL_INTEGER_OPTIONAL_INTEGER =
+      family(
+          ImmutableList.of(SqlTypeFamily.STRING, SqlTypeFamily.STRING, SqlTypeFamily.INTEGER,
+              SqlTypeFamily.INTEGER, SqlTypeFamily.INTEGER), i -> i == 2 || i == 3 || i == 4);
+
   public static final SqlSingleOperandTypeChecker STRING_INTEGER =
       family(SqlTypeFamily.STRING, SqlTypeFamily.INTEGER);
 
@@ -857,6 +996,10 @@ public abstract class OperandTypes {
       family(SqlTypeFamily.ANY, SqlTypeFamily.NUMERIC, SqlTypeFamily.ANY);
   public static final SqlSingleOperandTypeChecker ANY_STRING_STRING =
       family(SqlTypeFamily.ANY, SqlTypeFamily.STRING, SqlTypeFamily.STRING);
+  public static final SqlSingleOperandTypeChecker ANY_STRING_OPTIONAL_STRING =
+      family(ImmutableList.of(SqlTypeFamily.ANY, SqlTypeFamily.STRING, SqlTypeFamily.STRING),
+          // Third operand optional (operand index 0, 1, 2)
+          number -> number == 2);
 
   /**
    * Operand type-checking strategy used by {@code ARG_MIN(value, comp)} and
@@ -888,14 +1031,14 @@ public abstract class OperandTypes {
       new FamilyOperandTypeChecker(ImmutableList.of(SqlTypeFamily.ANY),
           i -> false) {
         @Override public boolean checkSingleOperandType(
-            SqlCallBinding callBinding, SqlNode node,
-            int iFormalOperand, boolean throwOnFailure) {
-          if (!super.checkSingleOperandType(callBinding, node, iFormalOperand,
+            SqlCallBinding callBinding, SqlNode operand,
+            int iFormalOperand, SqlTypeFamily family, boolean throwOnFailure) {
+          if (!super.checkSingleOperandType(callBinding, operand, iFormalOperand, family,
               throwOnFailure)) {
             return false;
           }
           final SqlValidatorScope scope = callBinding.getScope();
-          if (!scope.isMeasureRef(node)) {
+          if (!scope.isMeasureRef(operand)) {
             if (throwOnFailure) {
               throw callBinding.newValidationError(
                   RESOURCE.argumentMustBeMeasure(
@@ -957,7 +1100,8 @@ public abstract class OperandTypes {
       family(SqlTypeFamily.DATETIME_INTERVAL, SqlTypeFamily.DATETIME);
 
   public static final SqlSingleOperandTypeChecker INTERVALINTERVAL_INTERVALDATETIME =
-      INTERVAL_SAME_SAME.or(INTERVAL_DATETIME);
+      INTERVAL_SAME_SAME.or(INTERVAL_DATETIME)
+          .or(family(SqlTypeFamily.INTERVAL_DAY_TIME, SqlTypeFamily.INTERVAL_YEAR_MONTH));
 
   // TODO: datetime+interval checking missing
   // TODO: interval+datetime checking missing
@@ -998,6 +1142,15 @@ public abstract class OperandTypes {
           }
           return SAME_SAME.checkOperandTypes(callBinding, throwOnFailure);
         }
+
+        @Override public boolean checkOperandTypesWithoutTypeCoercion(
+            final SqlCallBinding callBinding,
+            final boolean throwOnFailure) {
+          if (!super.checkOperandTypesWithoutTypeCoercion(callBinding, throwOnFailure)) {
+            return false;
+          }
+          return SAME_SAME.checkOperandTypes(callBinding, throwOnFailure);
+        }
       };
 
   public static final SqlSingleOperandTypeChecker NUMERIC_OR_INTERVAL =
@@ -1017,6 +1170,39 @@ public abstract class OperandTypes {
 
         @Override public String getAllowedSignatures(SqlOperator op, String opName) {
           return "UNNEST(<MULTISET>)";
+        }
+      };
+
+  public static final SqlOperandTypeChecker EXISTS =
+      new SqlOperandTypeChecker() {
+        @Override public boolean checkOperandTypes(
+            SqlCallBinding callBinding,
+            boolean throwOnFailure) {
+          // The first operand must be an array type
+          ARRAY.checkSingleOperandType(callBinding, callBinding.operand(0), 0, throwOnFailure);
+          final RelDataType arrayType =
+              SqlTypeUtil.deriveType(callBinding, callBinding.operand(0));
+          final RelDataType componentType =
+              requireNonNull(arrayType.getComponentType(), "componentType");
+
+          // The second operand is a function(array_element_type)->boolean type
+          LambdaRelOperandTypeChecker lambdaChecker =
+              new LambdaRelOperandTypeChecker(
+                  SqlTypeFamily.BOOLEAN,
+                  ImmutableList.of(componentType));
+          return lambdaChecker.checkSingleOperandType(
+              callBinding,
+              callBinding.operand(1),
+              1,
+              throwOnFailure);
+        }
+
+        @Override public SqlOperandCountRange getOperandCountRange() {
+          return SqlOperandCountRanges.of(2);
+        }
+
+        @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+          return "EXISTS(<ARRAY>, <FUNCTION(ARRAY_ELEMENT_TYPE)->BOOLEAN>)";
         }
       };
 
@@ -1115,6 +1301,140 @@ public abstract class OperandTypes {
         }
       };
 
+  /** Checker that returns whether a value is a array of record type with two fields. */
+  private static class MapFromEntriesOperandTypeChecker
+      implements SqlSingleOperandTypeChecker {
+    @Override public boolean checkSingleOperandType(SqlCallBinding callBinding,
+        SqlNode node, int iFormalOperand, boolean throwOnFailure) {
+      assert 0 == iFormalOperand;
+      RelDataType type = SqlTypeUtil.deriveType(callBinding, node);
+      RelDataType componentType = requireNonNull(type.getComponentType(), "componentType");
+      boolean valid = false;
+      if (type.getSqlTypeName() == SqlTypeName.ARRAY
+          && componentType.getSqlTypeName() == SqlTypeName.ROW
+          && componentType.getFieldCount() == 2) {
+        valid = true;
+      }
+      if (!valid && throwOnFailure) {
+        throw callBinding.newValidationSignatureError();
+      }
+      return valid;
+    }
+
+    @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+      return SqlUtil.getAliasedSignature(op, opName,
+          ImmutableList.of("ARRAY<RECORDTYPE(TWO FIELDS)>"));
+    }
+  }
+
+  /**
+   * Operand type-checking strategy for a ARRAY function, it allows empty array.
+   */
+  private static class ArrayFunctionOperandTypeChecker
+      extends SameOperandTypeChecker {
+
+    ArrayFunctionOperandTypeChecker() {
+      // The args of array are non-fixed, so we set to -1 here. then operandCount
+      // can dynamically set according to the number of input args.
+      // details please see SameOperandTypeChecker#getOperandList.
+      super(-1);
+    }
+
+    @Override protected boolean checkOperandTypesImpl(
+        SqlOperatorBinding operatorBinding,
+        boolean throwOnFailure,
+        @Nullable SqlCallBinding callBinding) {
+      if (throwOnFailure && callBinding == null) {
+        throw new IllegalArgumentException(
+            "callBinding must be non-null in case throwOnFailure=true");
+      }
+      int nOperandsActual = nOperands;
+      if (nOperandsActual == -1) {
+        nOperandsActual = operatorBinding.getOperandCount();
+      }
+      RelDataType[] types = new RelDataType[nOperandsActual];
+      final List<Integer> operandList =
+          getOperandList(operatorBinding.getOperandCount());
+      for (int i : operandList) {
+        types[i] = operatorBinding.getOperandType(i);
+      }
+      for (int i : operandList) {
+        if (i > 0) {
+          // we replace SqlTypeUtil.isComparable with SqlTypeUtil.leastRestrictiveForComparison
+          // to handle struct type and NULL constant.
+          // details please see: https://issues.apache.org/jira/browse/CALCITE-6163
+          RelDataType type =
+              SqlTypeUtil.leastRestrictiveForComparison(operatorBinding.getTypeFactory(),
+                  types[i], types[i - 1]);
+          if (type == null) {
+            if (!throwOnFailure) {
+              return false;
+            }
+            throw requireNonNull(callBinding, "callBinding").newValidationError(
+                RESOURCE.needSameTypeParameter());
+          }
+        }
+      }
+      return true;
+    }
+  }
+
+  /**
+   * Operand type-checking strategy for a MAP function, it allows empty map.
+   */
+  private static class MapFunctionOperandTypeChecker
+      extends SameOperandTypeChecker {
+
+    MapFunctionOperandTypeChecker() {
+      // The args of map are non-fixed, so we set to -1 here. then operandCount
+      // can dynamically set according to the number of input args.
+      // details please see SameOperandTypeChecker#getOperandList.
+      super(-1);
+    }
+
+    @Override public boolean checkOperandTypes(final SqlCallBinding callBinding,
+        final boolean throwOnFailure) {
+      final List<RelDataType> argTypes =
+          SqlTypeUtil.deriveType(callBinding, callBinding.operands());
+      // allows empty map
+      if (argTypes.isEmpty()) {
+        return true;
+      }
+      // the size of map arg types must be even.
+      if (argTypes.size() % 2 != 0) {
+        throw callBinding.newValidationError(RESOURCE.mapRequiresEvenArgCount());
+      }
+      final Pair<@Nullable RelDataType, @Nullable RelDataType> componentType =
+          getComponentTypes(
+              callBinding.getTypeFactory(), argTypes);
+      // check key type & value type
+      if (null == componentType.left || null == componentType.right) {
+        if (throwOnFailure) {
+          throw callBinding.newValidationError(RESOURCE.needSameTypeParameter());
+        }
+        return false;
+      }
+      return true;
+    }
+
+    /**
+     * Extract the key type and value type of arg types.
+     */
+    private static Pair<@Nullable RelDataType, @Nullable RelDataType> getComponentTypes(
+        RelDataTypeFactory typeFactory,
+        List<RelDataType> argTypes) {
+      // Util.quotientList(argTypes, 2, 0):
+      // This extracts all elements at even indices from argTypes.
+      // It represents the types of keys in the map as they are placed at even positions
+      // e.g. 0, 2, 4, etc.
+      // Symmetrically, Util.quotientList(argTypes, 2, 1) represents odd-indexed elements.
+      // details please see Util.quotientList.
+      return Pair.of(
+          typeFactory.leastRestrictive(Util.quotientList(argTypes, 2, 0)),
+          typeFactory.leastRestrictive(Util.quotientList(argTypes, 2, 1)));
+    }
+  }
+
   /** Operand type-checker that accepts period types. Examples:
    *
    * <ul>
@@ -1158,6 +1478,47 @@ public abstract class OperandTypes {
     }
   }
 
+  /**
+   * Parameter type-checking strategy where types must be Map and Map key type.
+   */
+  private static class MapKeyOperandTypeChecker extends SameOperandTypeChecker {
+    MapKeyOperandTypeChecker() {
+      super(2);
+    }
+
+    @Override public boolean checkOperandTypes(
+        SqlCallBinding callBinding,
+        boolean throwOnFailure) {
+      final SqlNode op0 = callBinding.operand(0);
+      if (!OperandTypes.MAP.checkSingleOperandType(
+          callBinding,
+          op0,
+          0,
+          throwOnFailure)) {
+        return false;
+      }
+
+      final RelDataType mapKeyType =
+          getKeyTypeOrThrow(SqlTypeUtil.deriveType(callBinding, op0));
+      final SqlNode op1 = callBinding.operand(1);
+      RelDataType opType1 = SqlTypeUtil.deriveType(callBinding, op1);
+
+      RelDataType biggest =
+          callBinding.getTypeFactory().leastRestrictive(
+              ImmutableList.of(mapKeyType, opType1));
+      if (biggest == null) {
+        if (throwOnFailure) {
+          throw callBinding.newError(
+              RESOURCE.typeNotComparable(
+                  mapKeyType.toString(), opType1.toString()));
+        }
+
+        return false;
+      }
+      return true;
+    }
+  }
+
   /** Checker that passes if the operand's type has a particular
    * {@link SqlTypeName}. */
   private static class TypeNameChecker implements SqlSingleOperandTypeChecker,
@@ -1188,6 +1549,206 @@ public abstract class OperandTypes {
 
     @Override public String getAllowedSignatures(SqlOperator op, String opName) {
       return opName + "(" + typeName.getSpaceName() + ")";
+    }
+  }
+
+  /**
+   * Operand type-checking strategy where the type of the operand is a lambda
+   * expression with a given return type and argument {@link SqlTypeFamily}s.
+   */
+  private static class LambdaFamilyOperandTypeChecker
+      extends LambdaOperandTypeChecker {
+
+    private final List<SqlTypeFamily> argFamilies;
+
+    LambdaFamilyOperandTypeChecker(
+        SqlTypeFamily returnTypeFamily,
+        List<SqlTypeFamily> argFamilies) {
+      super(returnTypeFamily);
+      this.argFamilies = ImmutableList.copyOf(argFamilies);
+    }
+
+    @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+      ImmutableList.Builder<SqlTypeFamily> builder = ImmutableList.builder();
+      builder.addAll(argFamilies);
+      builder.add(returnTypeFamily);
+
+      return SqlUtil.getAliasedSignature(op, opName, builder.build());
+    }
+
+    @Override public boolean checkOperandTypes(SqlCallBinding callBinding,
+        boolean throwOnFailure) {
+      return false;
+    }
+
+    @Override public boolean checkSingleOperandType(
+        SqlCallBinding callBinding, SqlNode operand, int iFormalOperand, boolean throwOnFailure) {
+      if (!(operand instanceof SqlLambda)
+          || ((SqlLambda) operand).getParameters().size() != argFamilies.size()) {
+        if (throwOnFailure) {
+          throw callBinding.newValidationSignatureError();
+        }
+        return false;
+      }
+
+      final SqlLambda lambdaExpr = (SqlLambda) operand;
+      if (SqlUtil.isNullLiteral(lambdaExpr.getExpression(), false)) {
+        checkNull(callBinding, lambdaExpr, throwOnFailure);
+      }
+
+      final SqlValidator validator = callBinding.getValidator();
+      if (!lambdaExpr.getParameters().isEmpty()
+          && !argFamilies.stream().allMatch(f -> f == SqlTypeFamily.ANY)) {
+        // Replace the parameter types in the lambda expression.
+        final SqlLambdaScope scope =
+            (SqlLambdaScope) validator.getLambdaScope(lambdaExpr);
+        for (int i = 0; i < argFamilies.size(); i++) {
+          final SqlNode param = lambdaExpr.getParameters().get(i);
+          final RelDataType type =
+              argFamilies.get(i).getDefaultConcreteType(callBinding.getTypeFactory());
+          if (type != null) {
+            scope.getParameterTypes().put(param.toString(), type);
+          }
+        }
+        lambdaExpr.accept(new TypeRemover(validator));
+        // Given the new relDataType, re-validate the lambda expression.
+        validator.validateLambda(lambdaExpr);
+      }
+
+      return checkReturnType(validator, callBinding, lambdaExpr, throwOnFailure);
+    }
+  }
+
+  /**
+   * Operand type-checking strategy where the type of the operand is a lambda
+   * expression with a given return type and argument {@link RelDataType}s.
+   */
+  private static class LambdaRelOperandTypeChecker
+      extends LambdaOperandTypeChecker {
+    private final List<RelDataType> argTypes;
+
+    LambdaRelOperandTypeChecker(
+        SqlTypeFamily returnTypeFamily,
+        List<RelDataType> argTypes) {
+      super(returnTypeFamily);
+      this.argTypes = argTypes;
+    }
+
+    @Override public String getAllowedSignatures(SqlOperator op, String opName) {
+      ImmutableList.Builder<SqlTypeFamily> builder = ImmutableList.builder();
+      argTypes.stream()
+          .map(t -> requireNonNull(t.getSqlTypeName().getFamily()))
+          .forEach(builder::add);
+      builder.add(returnTypeFamily);
+
+      return SqlUtil.getAliasedSignature(op, opName, builder.build());
+    }
+
+    @Override public boolean checkSingleOperandType(SqlCallBinding callBinding, SqlNode operand,
+        int iFormalOperand,
+        boolean throwOnFailure) {
+      if (!(operand instanceof SqlLambda)
+          || ((SqlLambda) operand).getParameters().size() != argTypes.size()) {
+        if (throwOnFailure) {
+          throw callBinding.newValidationSignatureError();
+        }
+        return false;
+      }
+
+      final SqlLambda lambdaExpr = (SqlLambda) operand;
+      if (SqlUtil.isNullLiteral(lambdaExpr.getExpression(), false)) {
+        checkNull(callBinding, lambdaExpr, throwOnFailure);
+      }
+
+      // Replace the parameter types in the lambda expression.
+      final SqlValidator validator = callBinding.getValidator();
+      final SqlLambdaScope scope =
+          (SqlLambdaScope) validator.getLambdaScope(lambdaExpr);
+      for (int i = 0; i < argTypes.size(); i++) {
+        final SqlNode param = lambdaExpr.getParameters().get(i);
+        final RelDataType type = argTypes.get(i);
+        if (type != null) {
+          scope.getParameterTypes().put(param.toString(), type);
+        }
+      }
+      lambdaExpr.accept(new TypeRemover(validator));
+      // Given the new relDataType, re-validate the lambda expression.
+      validator.validateLambda(lambdaExpr);
+
+      return checkReturnType(validator, callBinding, lambdaExpr, throwOnFailure);
+    }
+  }
+
+  /**
+   * Abstract base class for type-checking strategies involving lambda expressions.
+   * This class provides common functionality for checking the type of lambda expression.
+   */
+  private abstract static class LambdaOperandTypeChecker
+      implements SqlSingleOperandTypeChecker {
+    protected final SqlTypeFamily returnTypeFamily;
+
+    LambdaOperandTypeChecker(SqlTypeFamily returnTypeFamily) {
+      this.returnTypeFamily = requireNonNull(returnTypeFamily, "returnTypeFamily");
+    }
+
+    protected boolean checkNull(
+        SqlCallBinding callBinding,
+        SqlLambda lambdaExpr,
+        boolean throwOnFailure) {
+      if (callBinding.isTypeCoercionEnabled()) {
+        return true;
+      }
+
+      if (throwOnFailure) {
+        throw callBinding.getValidator().newValidationError(lambdaExpr.getExpression(),
+            RESOURCE.nullIllegal());
+      }
+      return false;
+    }
+
+    protected boolean checkReturnType(
+        SqlValidator validator,
+        SqlCallBinding callBinding,
+        SqlLambda lambdaExpr,
+        boolean throwOnFailure) {
+      final RelDataType newType = validator.getValidatedNodeType(lambdaExpr);
+      assert newType instanceof FunctionSqlType;
+      final SqlTypeName returnTypeName =
+          ((FunctionSqlType) newType).getReturnType().getSqlTypeName();
+      if (returnTypeName == SqlTypeName.ANY
+          || returnTypeFamily.getTypeNames().contains(returnTypeName)) {
+        return true;
+      }
+
+      if (throwOnFailure) {
+        throw callBinding.newValidationSignatureError();
+      }
+      return false;
+    }
+
+    /**
+     * Visitor that removes the relDataType of a sqlNode and its children in the
+     * validator. Now this visitor is only used for removing the relDataType
+     * when we check lambda operand. Since lambda expressions will be
+     * validated for the second time based on the given parameter type,
+     * the type cached during the first validation must be cleared.
+     */
+    protected static class TypeRemover extends SqlBasicVisitor<Void> {
+      private final SqlValidator validator;
+
+      protected TypeRemover(SqlValidator validator) {
+        this.validator = validator;
+      }
+
+      @Override public Void visit(SqlIdentifier id) {
+        validator.removeValidatedNodeType(id);
+        return super.visit(id);
+      }
+
+      @Override public Void visit(SqlCall call) {
+        validator.removeValidatedNodeType(call);
+        return super.visit(call);
+      }
     }
   }
 }

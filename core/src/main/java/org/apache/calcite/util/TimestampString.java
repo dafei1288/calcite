@@ -25,6 +25,7 @@ import com.google.common.base.Strings;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.Calendar;
+import java.util.TimeZone;
 import java.util.regex.Pattern;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -75,7 +76,8 @@ public class TimestampString implements Comparable<TimestampString> {
    *
    * <p>For example,
    * {@code new TimestampString(1970, 1, 1, 2, 3, 4).withMillis(56)}
-   * yields {@code TIMESTAMP '1970-01-01 02:03:04.056'}. */
+   *
+   * @throws IllegalArgumentException if millis is outside the allowed range */
   public TimestampString withMillis(int millis) {
     checkArgument(millis >= 0 && millis < 1000);
     return withFraction(DateTimeStringUtils.pad(3, millis));
@@ -86,7 +88,9 @@ public class TimestampString implements Comparable<TimestampString> {
    *
    * <p>For example,
    * {@code new TimestampString(1970, 1, 1, 2, 3, 4).withNanos(56789)}
-   * yields {@code TIMESTAMP '1970-01-01 02:03:04.000056789'}. */
+   * yields {@code TIMESTAMP '1970-01-01 02:03:04.000056789'}.
+   *
+   * @throws IllegalArgumentException if nanos is outside the allowed range */
   public TimestampString withNanos(int nanos) {
     checkArgument(nanos >= 0 && nanos < 1000000000);
     return withFraction(DateTimeStringUtils.pad(9, nanos));
@@ -108,7 +112,7 @@ public class TimestampString implements Comparable<TimestampString> {
     while (fraction.endsWith("0")) {
       fraction = fraction.substring(0, fraction.length() - 1);
     }
-    if (fraction.length() > 0) {
+    if (!fraction.isEmpty()) {
       v = v + "." + fraction;
     }
     return new TimestampString(v);
@@ -217,6 +221,10 @@ public class TimestampString implements Comparable<TimestampString> {
 
   public Calendar toCalendar() {
     return Util.calendar(getMillisSinceEpoch());
+  }
+
+  public Calendar toCalendar(TimeZone timeZone) {
+    return Util.calendar(getMillisSinceEpoch(), timeZone);
   }
 
   /** Converts this TimestampString to a string, truncated or padded with

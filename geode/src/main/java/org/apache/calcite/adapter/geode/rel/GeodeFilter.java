@@ -37,8 +37,6 @@ import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Preconditions;
-
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.ArrayList;
@@ -48,6 +46,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 import static org.apache.calcite.sql.type.SqlTypeName.CHAR;
 
@@ -219,8 +219,7 @@ public class GeodeFilter extends Filter implements GeodeRel {
 
     /** Creates OQL {@code IN SET} predicate string. */
     private String translateInSet(List<RexNode> disjunctions) {
-      Preconditions.checkArgument(
-          !disjunctions.isEmpty(), "empty disjunctions");
+      checkArgument(!disjunctions.isEmpty(), "empty disjunctions");
 
       RexNode firstNode = disjunctions.get(0);
       RexCall firstCall = (RexCall) firstNode;
@@ -320,6 +319,9 @@ public class GeodeFilter extends Filter implements GeodeRel {
         return translateBinary(">=", "<=", (RexCall) node);
       case INPUT_REF:
         return translateBinary2("=", node, rexBuilder.makeLiteral(true));
+      case IS_NOT_NULL:
+        child = ((RexCall) node).getOperands().get(0);
+        return translateBinary2("<>", child, rexBuilder.makeNullLiteral(node.getType()));
       case NOT:
         child = ((RexCall) node).getOperands().get(0);
         if (child.getKind() == SqlKind.CAST) {

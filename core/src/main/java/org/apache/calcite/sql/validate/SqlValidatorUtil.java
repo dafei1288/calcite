@@ -31,12 +31,15 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
+import org.apache.calcite.runtime.PairList;
 import org.apache.calcite.schema.CustomColumnResolvingTable;
 import org.apache.calcite.schema.ExtensibleTable;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.schema.impl.AbstractSchema;
 import org.apache.calcite.schema.impl.AbstractTable;
+import org.apache.calcite.sql.SqlBasicCall;
 import org.apache.calcite.sql.SqlCall;
+import org.apache.calcite.sql.SqlCallBinding;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlDynamicParam;
 import org.apache.calcite.sql.SqlFunctionCategory;
@@ -47,6 +50,7 @@ import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.SqlOperatorBinding;
 import org.apache.calcite.sql.SqlOperatorTable;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSyntax;
@@ -60,7 +64,6 @@ import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -81,6 +84,9 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
 
+import static com.google.common.base.Preconditions.checkArgument;
+
+import static org.apache.calcite.linq4j.Nullness.castNonNullList;
 import static org.apache.calcite.sql.type.NonNullableAccessors.getCharset;
 import static org.apache.calcite.sql.type.NonNullableAccessors.getCollation;
 import static org.apache.calcite.util.Static.RESOURCE;
@@ -172,14 +178,11 @@ public class SqlValidatorUtil {
         extTable == null
             ? table.getRowType().getFieldCount()
             : extTable.getExtendedColumnOffset();
-    for (final Pair<SqlIdentifier, SqlDataTypeSpec> pair : pairs(extendedColumns)) {
-      final SqlIdentifier identifier = pair.left;
-      final SqlDataTypeSpec type = pair.right;
-      extendedFields.add(
-          new RelDataTypeFieldImpl(identifier.toString(),
-              extendedFieldOffset++,
-              type.deriveType(requireNonNull(validator, "validator"))));
-    }
+    pairs(extendedColumns).forEachIndexed((i, identifier, type) ->
+        extendedFields.add(
+            new RelDataTypeFieldImpl(identifier.toString(),
+                extendedFieldOffset + i,
+                type.deriveType(requireNonNull(validator, "validator")))));
     return extendedFields.build();
   }
 
@@ -187,9 +190,9 @@ public class SqlValidatorUtil {
    * (of the form [name0, type0, name1, type1, ...])
    * into a list of (name, type) pairs. */
   @SuppressWarnings({"unchecked", "rawtypes"})
-  private static List<Pair<SqlIdentifier, SqlDataTypeSpec>> pairs(
+  private static PairList<SqlIdentifier, SqlDataTypeSpec> pairs(
       SqlNodeList extendedColumns) {
-    return Util.pairs((List) extendedColumns);
+    return PairList.backedBy((List) extendedColumns.getList());
   }
 
   /**
@@ -328,7 +331,7 @@ public class SqlValidatorUtil {
    * "expr$<i>ordinal</i>"; never null
    */
   public static String alias(SqlNode node, int ordinal) {
-    Preconditions.checkArgument(ordinal >= 0);
+    checkArgument(ordinal >= 0);
     return requireNonNull(alias_(node, ordinal), "alias");
   }
 
@@ -379,8 +382,7 @@ public class SqlValidatorUtil {
       SqlValidatorCatalogReader catalogReader,
       RelDataTypeFactory typeFactory,
       SqlValidator.Config config) {
-    return new SqlValidatorImpl(opTab, catalogReader, typeFactory,
-        config);
+    return new SqlValidatorImpl(opTab, catalogReader, typeFactory, config);
   }
 
   /**
@@ -431,7 +433,7 @@ public class SqlValidatorUtil {
    * @return List of unique strings
    */
   @Deprecated // to be removed before 2.0
-  public static List<String> uniquify(List<String> nameList) {
+  public static List<String> uniquify(List<? extends @Nullable String> nameList) {
     return uniquify(nameList, EXPR_SUGGESTER, true);
   }
 
@@ -449,7 +451,8 @@ public class SqlValidatorUtil {
    * @return List of unique strings
    */
   @Deprecated // to be removed before 2.0
-  public static List<String> uniquify(List<String> nameList, Suggester suggester) {
+  public static List<String> uniquify(List<? extends @Nullable String> nameList,
+      Suggester suggester) {
     return uniquify(nameList, suggester, true);
   }
 
@@ -464,7 +467,7 @@ public class SqlValidatorUtil {
    *     distinct
    * @return List of unique strings
    */
-  public static List<String> uniquify(List<String> nameList,
+  public static List<String> uniquify(List<? extends @Nullable String> nameList,
       boolean caseSensitive) {
     return uniquify(nameList, EXPR_SUGGESTER, caseSensitive);
   }
@@ -485,9 +488,17 @@ public class SqlValidatorUtil {
       List<? extends @Nullable String> nameList,
       Suggester suggester,
       boolean caseSensitive) {
-    final Set<String> used = caseSensitive
-        ? new LinkedHashSet<>()
-        : new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    final Set<String> used;
+    if (caseSensitive) {
+      // Shortcut (avoiding creating a hash map) if the list is short and has
+      // no nulls.
+      if (Util.isDefinitelyDistinctAndNonNull(nameList)) {
+        return castNonNullList(nameList);
+      }
+      used = new LinkedHashSet<>();
+    } else {
+      used = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    }
     int changeCount = 0;
     final List<String> newNameList = new ArrayList<>();
     for (String name : nameList) {
@@ -498,7 +509,7 @@ public class SqlValidatorUtil {
       newNameList.add(uniqueName);
     }
     return changeCount == 0
-        ? (List<String>) nameList
+        ? castNonNullList(nameList)
         : newNameList;
   }
 
@@ -523,7 +534,7 @@ public class SqlValidatorUtil {
       RelDataTypeFactory typeFactory,
       @Nullable List<String> fieldNameList,
       List<RelDataTypeField> systemFieldList) {
-    assert systemFieldList != null;
+    requireNonNull(systemFieldList, "systemFieldList");
     switch (joinType) {
     case LEFT:
       rightType =
@@ -1301,6 +1312,162 @@ public class SqlValidatorUtil {
     return null;
   }
 
+  /**
+   * When the array element does not equal the array component type, make explicit casting.
+   *
+   * @param componentType derived array component type
+   * @param opBinding description of call
+   */
+  public static void adjustTypeForArrayConstructor(
+      RelDataType componentType, SqlOperatorBinding opBinding) {
+    if (opBinding instanceof SqlCallBinding) {
+      requireNonNull(componentType, "array component type");
+      adjustTypeForMultisetConstructor(
+          componentType, componentType, (SqlCallBinding) opBinding);
+    }
+  }
+
+  /**
+   * Adjusts the types of specified operands in an array operation to match a given target type.
+   * This is particularly useful in the context of SQL operations involving array functions,
+   * where it's necessary to ensure that all operands have consistent types for the operation
+   * to be valid.
+   *
+   * <p>This method operates on the assumption that the operands to be adjusted are part of a
+   * {@link SqlCall}, which is bound within a {@link SqlOperatorBinding}. The operands to be
+   * cast are identified by their indexes within the {@code operands} list of the {@link SqlCall}.
+   * The method performs a dynamic check to determine if an operand is a basic call to an array.
+   * If so, it casts each element within the array to the target type.
+   * Otherwise, it casts the operand itself to the target type.
+   *
+   * <p>Example usage: For an operation like {@code array_append(array(1,2), cast(2 as tinyint))},
+   * if targetType is double, this method would ensure that the elements of the
+   * first array and the second operand are cast to double.
+   *
+   * @param targetType The target {@link RelDataType} to which the operands should be cast.
+   * @param opBinding  The {@link SqlOperatorBinding} context, which provides access to the
+   *                   {@link SqlCall} and its operands.
+   * @param indexes    The indexes of the operands within the {@link SqlCall} that need to be
+   *                   adjusted to the target type.
+   * @throws NullPointerException if {@code targetType} is {@code null}.
+   */
+  public static void adjustTypeForArrayFunctions(
+      RelDataType targetType, SqlOperatorBinding opBinding, int... indexes) {
+    if (opBinding instanceof SqlCallBinding) {
+      requireNonNull(targetType, "array function target type");
+      SqlCall call = ((SqlCallBinding) opBinding).getCall();
+      List<SqlNode> operands = call.getOperandList();
+      for (int idx : indexes) {
+        SqlNode operand = operands.get(idx);
+        if (operand instanceof SqlBasicCall
+            // not use SqlKind to compare because some other array function forms
+            // such as spark array, the SqlKind is other function.
+            // however, the name is same for those different array forms.
+            && "ARRAY".equals(((SqlBasicCall) operand).getOperator().getName())) {
+          call.setOperand(idx, castArrayElementTo(operand, targetType));
+        } else {
+          call.setOperand(idx, castTo(operand, targetType));
+        }
+      }
+    }
+  }
+
+  /**
+   * When the map key or value does not equal the map component key type or value type,
+   * make explicit casting.
+   *
+   * @param componentType derived map pair component type
+   * @param opBinding description of call
+   */
+  public static void adjustTypeForMapConstructor(
+      Pair<RelDataType, RelDataType> componentType, SqlOperatorBinding opBinding) {
+    if (opBinding instanceof SqlCallBinding) {
+      requireNonNull(componentType.getKey(), "map key type");
+      requireNonNull(componentType.getValue(), "map value type");
+      adjustTypeForMultisetConstructor(
+          componentType.getKey(), componentType.getValue(), (SqlCallBinding) opBinding);
+    }
+  }
+
+  /**
+   * Adjusts the types for operands in a SqlCallBinding during the construction of a sql collection
+   * type such as Array or Map. This method iterates from the operands of a {@link SqlCall}
+   * obtained from the provided {@link SqlCallBinding}.
+   * It modifies each operand to match the specified 'evenType' or 'oddType' depending on whether
+   * the operand's position is even or odd, respectively. The type adjustment is performed by
+   * explicitly casting each operand to the desired type if the existing operand type does not
+   * match the desired type without considering field names.
+   * If we adjust array, we should set 'evenType' and 'oddType' to same desired type,
+   * if we adjust map, we should set 'evenType' as map key type and 'oddType' as map value type.
+   *
+   * <p>For example, if the operand types are {@code [INT, STRING, INT, STRING]}
+   * with {@code evenType} as {@code BOOLEAN} and {@code oddType} as {@code DOUBLE},
+   * after executing this method, the types should be {@code [BOOLEAN, DOUBLE, BOOLEAN, DOUBLE]},
+   * then the corresponding operands are cast to these types.
+   *
+   * @param evenType the {@link RelDataType} to which the operands at even positions should be cast
+   * @param oddType the {@link RelDataType} to which the operands at odd positions should be cast
+   * @param sqlCallBinding the {@link SqlCallBinding} containing the operands to be adjusted
+   */
+  private static void adjustTypeForMultisetConstructor(
+      RelDataType evenType, RelDataType oddType, SqlCallBinding sqlCallBinding) {
+    SqlCall call = sqlCallBinding.getCall();
+    List<RelDataType> operandTypes = sqlCallBinding.collectOperandTypes();
+    List<SqlNode> operands = call.getOperandList();
+    RelDataType elementType;
+    for (int i = 0; i < operands.size(); i++) {
+      if (i % 2 == 0) {
+        elementType = evenType;
+      } else {
+        elementType = oddType;
+      }
+      if (!operandTypes.get(i).equalsSansFieldNames(elementType)) {
+        call.setOperand(i, castTo(operands.get(i), elementType));
+      }
+    }
+  }
+
+  /**
+   * Creates a CAST operation to cast a given {@link SqlNode} to a specified {@link RelDataType}.
+   * This method uses the {@link SqlStdOperatorTable#CAST} operator to create a new {@link SqlCall}
+   * node representing a CAST operation. The original 'node' is cast to the desired 'type',
+   * preserving the nullability of the 'type'.
+   *
+   * @param node the {@link SqlNode} which is to be cast
+   * @param type the target {@link RelDataType} to which 'node' should be cast
+   * @return a new {@link SqlNode} representing the CAST operation
+   */
+  private static SqlNode castTo(SqlNode node, RelDataType type) {
+    return SqlStdOperatorTable.CAST.createCall(
+        SqlParserPos.ZERO,
+        node,
+        SqlTypeUtil.convertTypeToSpec(type).withNullable(type.isNullable()));
+  }
+
+  /**
+   * Creates a CAST operation that cast each element of the given {@link SqlNode} to the
+   * specified type. The {@link SqlNode} representing an array and a {@link RelDataType}
+   * representing the target type. This method uses the {@link SqlStdOperatorTable#CAST}
+   * operator to create a new {@link SqlCall} node representing a CAST operation.
+   * Each element of original 'node' is cast to the desired 'type', preserving the
+   * nullability of the 'type'.
+   *
+   * @param node the {@link SqlNode} the sqlnode representing an array
+   * @param type the target {@link RelDataType} the target type
+   * @return a new {@link SqlNode} representing the CAST operation
+   */
+  private static SqlNode castArrayElementTo(SqlNode node, RelDataType type) {
+    int i = 0;
+    for (SqlNode operand : ((SqlBasicCall) node).getOperandList()) {
+      SqlNode castedOperand =
+          SqlStdOperatorTable.CAST.createCall(SqlParserPos.ZERO,
+              operand,
+              SqlTypeUtil.convertTypeToSpec(type).withNullable(type.isNullable()));
+      ((SqlBasicCall) node).setOperand(i++, castedOperand);
+    }
+    return node;
+  }
+
   //~ Inner Classes ----------------------------------------------------------
 
   /**
@@ -1443,11 +1610,11 @@ public class SqlValidatorUtil {
         @Nullable SqlCall distinctCall, @Nullable SqlCall orderCall) {
       this.aggregateCall =
           Objects.requireNonNull(aggregateCall, "aggregateCall");
-      Preconditions.checkArgument(filterCall == null
+      checkArgument(filterCall == null
           || filterCall.getKind() == SqlKind.FILTER);
-      Preconditions.checkArgument(distinctCall == null
+      checkArgument(distinctCall == null
           || distinctCall.getKind() == SqlKind.WITHIN_DISTINCT);
-      Preconditions.checkArgument(orderCall == null
+      checkArgument(orderCall == null
           || orderCall.getKind() == SqlKind.WITHIN_GROUP);
       this.filterCall = filterCall;
       this.filter = filterCall == null ? null : filterCall.operand(1);

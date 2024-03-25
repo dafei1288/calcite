@@ -79,6 +79,7 @@ parser: {
     "CONSTRAINTS"
     "CONSTRAINT_SCHEMA"
     "CONSTRUCTOR"
+    "CONTAINS_SUBSTR"
     "CONTINUE"
     "CURSOR_NAME"
     "DATA"
@@ -209,8 +210,6 @@ parser: {
     "PASSTHROUGH"
     "PAST"
     "PATH"
-    "PERCENTILE_CONT"
-    "PERCENTILE_DISC"
     "PIVOT"
     "PLACING"
     "PLAN"
@@ -424,6 +423,12 @@ parser: {
   dropStatementParserMethods: [
   ]
 
+  # List of methods for parsing extensions to "TRUNCATE" calls.
+  # Each must accept arguments "(SqlParserPos pos)".
+  # Example: "SqlTruncate".
+  truncateStatementParserMethods: [
+  ]
+
   # Binary operators tokens.
   # Example: "< INFIX_CAST: \"::\" >".
   binaryOperatorsTokens: [
@@ -441,11 +446,11 @@ parser: {
   # Example: "parserImpls.ftl".
   implementationFiles: [
   ]
-  
+
   # Custom identifier token.
   # Example: "< IDENTIFIER: (<LETTER>|<DIGIT>)+ >".
   customIdentifierToken: ""
-      
+
   includePosixOperators: false
   includeCompoundIdentifier: true
   includeBraces: true

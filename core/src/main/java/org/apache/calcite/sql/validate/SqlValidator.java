@@ -33,6 +33,7 @@ import org.apache.calcite.sql.SqlFunction;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlIntervalQualifier;
+import org.apache.calcite.sql.SqlLambda;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlMatchRecognize;
 import org.apache.calcite.sql.SqlMerge;
@@ -302,6 +303,16 @@ public interface SqlValidator {
   void validateMatchRecognize(SqlCall pattern);
 
   /**
+   * Validates a lambda expression. lambda expression will be validated twice
+   * during the validation process. The first time is validate lambda expression
+   * namespace, the second time is when validating higher order function operands
+   * type check.
+   *
+   * @param lambdaExpr Lambda expression
+   */
+  void validateLambda(SqlLambda lambdaExpr);
+
+  /**
    * Validates a call to an operator.
    *
    * @param call  Operator call
@@ -325,18 +336,6 @@ public interface SqlValidator {
   void validateAggregateParams(SqlCall aggCall, @Nullable SqlNode filter,
       @Nullable SqlNodeList distinctList, @Nullable SqlNodeList orderList,
       SqlValidatorScope scope);
-
-  /**
-   * Validates a COLUMN_LIST parameter.
-   *
-   * @param function function containing COLUMN_LIST parameter
-   * @param argTypes function arguments
-   * @param operands operands passed into the function call
-   */
-  void validateColumnListParams(
-      SqlFunction function,
-      List<RelDataType> argTypes,
-      List<SqlNode> operands);
 
   /**
    * If an identifier is a legitimate call to a function that has no
@@ -613,6 +612,14 @@ public interface SqlValidator {
    * @return naming scope for Match recognize clause
    */
   SqlValidatorScope getMatchRecognizeScope(SqlMatchRecognize node);
+
+  /**
+   * Returns the lambda expression scope.
+   *
+   * @param node Lambda expression
+   * @return naming scope for lambda expression
+   */
+  SqlValidatorScope getLambdaScope(SqlLambda node);
 
   /**
    * Returns a scope that cannot see anything.
@@ -905,15 +912,39 @@ public interface SqlValidator {
      */
     Config withLenientOperatorLookup(boolean lenient);
 
-    /** Returns whether the validator allows measures to be used without the
-     * AGGREGATE function. Default is true. */
-    @Value.Default default boolean nakedMeasures() {
+    /** Returns whether the validator allows measures to be used without
+     * AGGREGATE function in a non-aggregate query. Default is true.
+     */
+    @Value.Default default boolean nakedMeasuresInNonAggregateQuery() {
       return true;
     }
 
+    /** Sets whether the validator allows measures to be used without AGGREGATE
+     * function in a non-aggregate query.
+     */
+    Config withNakedMeasuresInNonAggregateQuery(boolean value);
+
+    /** Returns whether the validator allows measures to be used without
+     * AGGREGATE function in an aggregate query. Default is true.
+     */
+    @Value.Default default boolean nakedMeasuresInAggregateQuery() {
+      return true;
+    }
+
+    /** Sets whether the validator allows measures to be used without AGGREGATE
+     * function in an aggregate query.
+     */
+    Config withNakedMeasuresInAggregateQuery(boolean value);
+
     /** Sets whether the validator allows measures to be used without the
-     * AGGREGATE function. */
-    Config withNakedMeasures(boolean nakedMeasures);
+     * AGGREGATE function inside or outside aggregate queries.
+     * Deprecated: use the inside / outside variants instead.
+     */
+    @Deprecated // to be removed before 1.38
+    default Config withNakedMeasures(boolean nakedMeasures) {
+      return withNakedMeasuresInAggregateQuery(nakedMeasures)
+              .withNakedMeasuresInNonAggregateQuery(nakedMeasures);
+    }
 
     /** Returns whether the validator supports implicit type coercion. */
     @Value.Default default boolean typeCoercionEnabled() {

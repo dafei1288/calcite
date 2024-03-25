@@ -68,8 +68,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * Testing mongo adapter functionality. By default runs with
- * <a href="https://github.com/fakemongo/fongo">Fongo</a> unless {@code IT} maven profile is enabled
+ * Testing mongo adapter functionality. By default, runs with
+ * Mongo Java Server unless {@code IT} maven profile is enabled
  * (via {@code $ mvn -Pit install}).
  *
  * @see MongoDatabasePolicy
@@ -817,5 +817,15 @@ public class MongoAdapterTest implements SchemaFactory {
         fail("Should have failed previously because expected != actual is known to be true");
       }
     };
+  }
+
+  @Test void testColumnQuoting() {
+    assertModel(MODEL)
+        .query("select state as \"STATE\", avg(pop) as \"AVG(pop)\" "
+            + "from zips "
+            + "group by \"STATE\" "
+            + "order by \"AVG(pop)\"")
+        .limit(2)
+        .returns("STATE=VT; AVG(pop)=26408\nSTATE=AK; AVG(pop)=26856\n");
   }
 }

@@ -34,11 +34,11 @@ import org.apache.calcite.sql.validate.SqlValidatorNamespace;
 import org.apache.calcite.util.Glossary;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Preconditions;
-
 import java.util.AbstractList;
 import java.util.List;
 import java.util.function.UnaryOperator;
+
+import static com.google.common.base.Preconditions.checkArgument;
 
 import static org.apache.calcite.sql.type.NonNullableAccessors.getCharset;
 import static org.apache.calcite.sql.type.NonNullableAccessors.getCollation;
@@ -176,6 +176,14 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference ARG0_NULLABLE =
       ARG0.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
+   * Type-inference strategy whereby the result type of a call is the type of
+   * the operand #0 (0-based). If the operand #0 (0-based) is nullable, the
+   * returned type will also be nullable.
+   */
+  public static final SqlReturnTypeInference ARG0_NULLABLE_IF_ARG0_NULLABLE =
+      ARG0.andThen(SqlTypeTransforms.ARG0_NULLABLE);
 
   /**
    * Type-inference strategy whereby the result type of a call is the type of
@@ -369,6 +377,13 @@ public abstract class ReturnTypes {
       explicit(SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE);
 
   /**
+   * Type-inference strategy whereby the result type of a call is TIMESTAMP
+   * WITH TIME ZONE.
+   */
+  public static final SqlReturnTypeInference TIMESTAMP_TZ =
+      explicit(SqlTypeName.TIMESTAMP_TZ);
+
+  /**
    * Type-inference strategy whereby the result type of a call is nullable
    * TIMESTAMP WITH LOCAL TIME ZONE.
    */
@@ -389,6 +404,13 @@ public abstract class ReturnTypes {
       DOUBLE.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
+   * Type-inference strategy whereby the result type of a call is a nullable
+   * Double.
+   */
+  public static final SqlReturnTypeInference DOUBLE_FORCE_NULLABLE =
+      DOUBLE.andThen(SqlTypeTransforms.FORCE_NULLABLE);
+
+  /**
    * Type-inference strategy whereby the result type of a call is a Char.
    */
   public static final SqlReturnTypeInference CHAR =
@@ -400,6 +422,19 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference CHAR_FORCE_NULLABLE =
       CHAR.andThen(SqlTypeTransforms.FORCE_NULLABLE);
+
+  /**
+   * Type-inference strategy whereby the result type of a call is a TINYINT.
+   */
+  public static final SqlReturnTypeInference TINYINT =
+          explicit(SqlTypeName.TINYINT);
+
+  /**
+   * Type-inference strategy whereby the result type of a call is a TINYINT
+   * with nulls allowed if any of the operands allow nulls.
+   */
+  public static final SqlReturnTypeInference TINYINT_NULLABLE =
+          TINYINT.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
    * Type-inference strategy whereby the result type of a call is an Integer.
@@ -474,6 +509,19 @@ public abstract class ReturnTypes {
       VARCHAR.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
+   * Type-inference strategy that always returns "VARBINARY".
+   */
+  public static final SqlReturnTypeInference VARBINARY =
+      ReturnTypes.explicit(SqlTypeName.VARBINARY);
+
+  /**
+   * Type-inference strategy that always returns "VARBINARY" with nulls
+   * allowed if any of the operands allow nulls.
+   */
+  public static final SqlReturnTypeInference VARBINARY_NULLABLE =
+      VARBINARY.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
    * Type-inference strategy for Histogram agg support.
    */
   public static final SqlReturnTypeInference HISTOGRAM =
@@ -504,6 +552,29 @@ public abstract class ReturnTypes {
           opBinding.collectOperandTypes());
 
   /**
+   * Type-inference strategy that returns the type of the first operand, unless it
+   * is an integer type, in which case the return type is DOUBLE.
+   */
+  public static final SqlReturnTypeInference ARG0_EXCEPT_INTEGER = opBinding ->  {
+    RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
+    RelDataType opType = opBinding.getOperandType(0);
+    if (SqlTypeName.INT_TYPES.contains(opType.getSqlTypeName())) {
+      return typeFactory.createTypeWithNullability(
+          typeFactory.createSqlType(SqlTypeName.DOUBLE), false);
+    } else {
+      return opType;
+    }
+  };
+
+  /**
+   * Same as {@link #ARG0_EXCEPT_INTEGER} but returns with nullability if any of
+   * the operands is nullable by using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NULLABLE}.
+   */
+  public static final SqlReturnTypeInference ARG0_EXCEPT_INTEGER_NULLABLE =
+      ARG0_EXCEPT_INTEGER.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
    * Returns the same type as the multiset carries. The multiset type returned
    * is the least restrictive of the call's multiset operands
    */
@@ -517,13 +588,13 @@ public abstract class ReturnTypes {
                 RelDataType type =
                     opBinding.getOperandType(index)
                         .getComponentType();
-                assert type != null;
+                if (type == null) {
+                  return opBinding.getTypeFactory().createSqlType(SqlTypeName.NULL);
+                }
                 return type;
               }
 
-              @Override public int size() {
-                return opBinding.getOperandCount();
-              }
+              @Override public int size() { return opBinding.getOperandCount(); }
             });
     RelDataType biggestElementType =
         LEAST_RESTRICTIVE.inferReturnType(newBinding);
@@ -534,7 +605,7 @@ public abstract class ReturnTypes {
   };
 
   /**
-   * Returns the element type of a ARRAY or MULTISET.
+   * Returns the element type of an ARRAY or MULTISET.
    *
    * <p>For example, given <code>INTEGER ARRAY or MULTISET ARRAY</code>, returns
    * <code>INTEGER</code>.
@@ -558,10 +629,11 @@ public abstract class ReturnTypes {
       ARG0.andThen(SqlTypeTransforms.TO_MULTISET);
 
   /**
-   * Returns the element type of a MULTISET.
+   * Returns the element type of a MULTISET, with nullability enforced.
    */
-  public static final SqlReturnTypeInference MULTISET_ELEMENT_NULLABLE =
-      MULTISET.andThen(SqlTypeTransforms.TO_COLLECTION_ELEMENT_TYPE);
+  public static final SqlReturnTypeInference MULTISET_ELEMENT_FORCE_NULLABLE =
+      MULTISET.andThen(SqlTypeTransforms.TO_COLLECTION_ELEMENT_TYPE)
+          .andThen(SqlTypeTransforms.FORCE_NULLABLE);
 
   /**
    * Same as {@link #MULTISET} but returns with nullability if any of the
@@ -596,6 +668,22 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference TO_MAP =
       ARG0.andThen(SqlTypeTransforms.TO_MAP);
+
+  /**
+   * Returns a MAP type.
+   *
+   * <p>For example, given {@code STRING}, returns
+   * {@code (STRING, STRING) MAP}.
+   */
+  public static final SqlReturnTypeInference IDENTITY_TO_MAP =
+      ARG0.andThen(SqlTypeTransforms.IDENTITY_TO_MAP);
+
+  /**
+   * Same as {@link #IDENTITY_TO_MAP} but returns with nullability if any of the
+   * operands is nullable.
+   */
+  public static final SqlReturnTypeInference IDENTITY_TO_MAP_NULLABLE =
+      IDENTITY_TO_MAP.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
    * Returns a ROW type.
@@ -714,6 +802,15 @@ public abstract class ReturnTypes {
       DECIMAL_PRODUCT.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
+   * Same as {@link #DECIMAL_PRODUCT_NULLABLE} but returns with nullability if any of
+   * the operands is nullable or the operation results in overflow by using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#FORCE_NULLABLE}. Also handles
+   * multiplication for integers, not just decimals.
+   */
+  public static final SqlReturnTypeInference PRODUCT_FORCE_NULLABLE =
+      DECIMAL_PRODUCT_NULLABLE.orElse(LEAST_RESTRICTIVE).andThen(SqlTypeTransforms.FORCE_NULLABLE);
+
+  /**
    * Type-inference strategy whereby the result type of a call is
    * {@link #DECIMAL_PRODUCT_NULLABLE} with a fallback to
    * {@link #ARG0_INTERVAL_NULLABLE}
@@ -745,6 +842,28 @@ public abstract class ReturnTypes {
       DECIMAL_QUOTIENT.andThen(SqlTypeTransforms.TO_NULLABLE);
 
   /**
+  * Type-inference strategy whereby the result type of a call is
+  * {@link #DOUBLE} if both operands are integer types.
+  */
+  public static final SqlReturnTypeInference DOUBLE_IF_INTEGERS = opBinding -> {
+    RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
+    SqlTypeName type1 = opBinding.getOperandType(0).getSqlTypeName();
+    SqlTypeName type2 = opBinding.getOperandType(1).getSqlTypeName();
+    boolean isInts = SqlTypeName.INT_TYPES.contains(type1) && SqlTypeName.INT_TYPES.contains(type2);
+    return isInts ? typeFactory.createTypeWithNullability(
+        typeFactory.createSqlType(SqlTypeName.DOUBLE), true) : null;
+  };
+
+  /**
+   * Same as {@link #DECIMAL_QUOTIENT_NULLABLE} but returns with nullability if any of
+   * the operands is nullable or the operation results in overflow by using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#FORCE_NULLABLE}. Also handles
+   * multiplication for integers, not just decimals.
+   */
+  public static final SqlReturnTypeInference QUOTIENT_FORCE_NULLABLE =
+      DECIMAL_QUOTIENT_NULLABLE.orElse(LEAST_RESTRICTIVE).andThen(SqlTypeTransforms.FORCE_NULLABLE);
+
+  /**
    * Type-inference strategy whereby the result type of a call is
    * {@link #DECIMAL_QUOTIENT_NULLABLE} with a fallback to
    * {@link #ARG0_INTERVAL_NULLABLE} and {@link #LEAST_RESTRICTIVE}. These rules
@@ -773,6 +892,15 @@ public abstract class ReturnTypes {
    */
   public static final SqlReturnTypeInference DECIMAL_SUM_NULLABLE =
       DECIMAL_SUM.andThen(SqlTypeTransforms.TO_NULLABLE);
+
+  /**
+   * Same as {@link #DECIMAL_SUM_NULLABLE} but returns with nullability if any of
+   * the operands is nullable or the operation results in overflow by using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#FORCE_NULLABLE}. Also handles
+   * addition for integers, not just decimals.
+   */
+  public static final SqlReturnTypeInference SUM_FORCE_NULLABLE =
+      DECIMAL_SUM_NULLABLE.orElse(LEAST_RESTRICTIVE).andThen(SqlTypeTransforms.FORCE_NULLABLE);
 
   /**
    * Type-inference strategy whereby the result type of a call is
@@ -841,8 +969,7 @@ public abstract class ReturnTypes {
             && !containsNullType
             && !(SqlTypeUtil.inCharOrBinaryFamilies(argType0)
             && SqlTypeUtil.inCharOrBinaryFamilies(argType1))) {
-          Preconditions.checkArgument(
-              SqlTypeUtil.sameNamedType(argType0, argType1));
+          checkArgument(SqlTypeUtil.sameNamedType(argType0, argType1));
         }
         SqlCollation pickedCollation = null;
         if (!containsAnyType
@@ -916,7 +1043,7 @@ public abstract class ReturnTypes {
    * <p>concat(cast('a' as varchar(2)), cast('b' as varchar(3)),cast('c' as varchar(2)))
    * returns varchar(7).
    *
-   * <p>concat(cast('a' as varchar), cast('b' as varchar(2), cast('c' as varchar(2))))
+   * <p>concat(cast('a' as varchar), cast('b' as varchar(2)), cast('c' as varchar(2)))
    * returns varchar.
    *
    * <p>concat(cast('a' as varchar(65535)), cast('b' as varchar(2)), cast('c' as varchar(2)))
@@ -931,7 +1058,7 @@ public abstract class ReturnTypes {
         List<RelDataType> operandTypes = opBinding.collectOperandTypes();
         final RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
         final RelDataTypeSystem typeSystem = typeFactory.getTypeSystem();
-        for (RelDataType operandType: operandTypes) {
+        for (RelDataType operandType : operandTypes) {
           int operandPrecision = operandType.getPrecision();
           amount = (long) operandPrecision + amount;
           if (operandPrecision == RelDataType.PRECISION_NOT_SPECIFIED) {
@@ -954,6 +1081,68 @@ public abstract class ReturnTypes {
       };
 
   /**
+   * Type-inference strategy for String concatenation with separator.
+   * The precision of separator should be calculated during combining.
+   * Result is varying if either input is; otherwise fixed.
+   *
+   * <p>For example:
+   *
+   * <ul>
+   * <li>{@code concat_ws(',', cast('a' as varchar(2), cast('b' as
+   * varchar(3)), cast('c' as varchar(2)))}
+   * returns {@code varchar(9)};
+   *
+   * <li>{@code concat_ws(',', cast('a' as varchar), cast('b' as
+   * varchar(2)), cast('c' as varchar(2)))}
+   * returns {@code varchar};
+   *
+   * <li>{@code concat_ws(',', cast('a' as varchar(65535)), cast('b'
+   * as varchar(2)), cast('c' as varchar(2)))}
+   * returns {@code varchar}.
+   * </ul>
+   */
+  public static final SqlReturnTypeInference MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION =
+      ReturnTypes::multivalentStringWithSepSumPrecision;
+
+  private static RelDataType multivalentStringWithSepSumPrecision(
+      SqlOperatorBinding opBinding) {
+    boolean hasPrecisionNotSpecifiedOperand = false;
+    boolean precisionOverflow = false;
+    int typePrecision = RelDataType.PRECISION_NOT_SPECIFIED;
+    long amount = 0;
+    List<RelDataType> operandTypes = opBinding.collectOperandTypes();
+    final RelDataTypeFactory typeFactory = opBinding.getTypeFactory();
+    final RelDataTypeSystem typeSystem = typeFactory.getTypeSystem();
+    int separatorPrecision = operandTypes.get(0).getPrecision();
+    // when separator's precision is not specified
+    if (separatorPrecision == typePrecision) {
+      return typeFactory.createSqlType(SqlTypeName.VARCHAR, typePrecision);
+    }
+    for (int i = 1; i < operandTypes.size(); i++) {
+      int operandPrecision = operandTypes.get(i).getPrecision();
+      amount = (long) operandPrecision + amount;
+      // separator's Precision shouldn't be added when encountering null value
+      // or the last string arg
+      if (operandPrecision >= 0 && i < operandTypes.size() - 1) {
+        amount = amount + separatorPrecision;
+      }
+      if (operandPrecision == RelDataType.PRECISION_NOT_SPECIFIED) {
+        hasPrecisionNotSpecifiedOperand = true;
+        break;
+      }
+      if (amount > typeSystem.getMaxPrecision(SqlTypeName.VARCHAR)) {
+        precisionOverflow = true;
+        break;
+      }
+    }
+    if (!(hasPrecisionNotSpecifiedOperand || precisionOverflow)) {
+      typePrecision = (int) amount;
+    }
+
+    return typeFactory.createSqlType(SqlTypeName.VARCHAR, typePrecision);
+  }
+
+  /**
    * Same as {@link #MULTIVALENT_STRING_SUM_PRECISION} and using
    * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NULLABLE}.
    */
@@ -965,14 +1154,34 @@ public abstract class ReturnTypes {
    * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NOT_NULLABLE}.
    */
   public static final SqlReturnTypeInference MULTIVALENT_STRING_SUM_PRECISION_NOT_NULLABLE =
-      MULTIVALENT_STRING_SUM_PRECISION.andThen(SqlTypeTransforms.TO_NOT_NULLABLE);
+      MULTIVALENT_STRING_SUM_PRECISION
+          .andThen(SqlTypeTransforms.TO_NOT_NULLABLE);
+
+  /**
+   * Same as {@link #MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION} and using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NOT_NULLABLE}.
+   */
+  public static final SqlReturnTypeInference
+      MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION_NOT_NULLABLE =
+          MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION
+              .andThen(SqlTypeTransforms.TO_NOT_NULLABLE);
+
+  /**
+   * Same as {@link #MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION} and using
+   * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NULLABLE_ALL}.
+   */
+  public static final SqlReturnTypeInference
+      MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION_ARG0_NULLABLE =
+          MULTIVALENT_STRING_WITH_SEP_SUM_PRECISION
+              .andThen(SqlTypeTransforms.ARG0_NULLABLE);
 
   /**
    * Same as {@link #MULTIVALENT_STRING_SUM_PRECISION} and using
    * {@link org.apache.calcite.sql.type.SqlTypeTransforms#TO_NULLABLE_ALL}.
    */
   public static final SqlReturnTypeInference MULTIVALENT_STRING_SUM_PRECISION_NULLABLE_ALL =
-      MULTIVALENT_STRING_SUM_PRECISION.andThen(SqlTypeTransforms.TO_NULLABLE_ALL);
+      MULTIVALENT_STRING_SUM_PRECISION
+          .andThen(SqlTypeTransforms.TO_NULLABLE_ALL);
 
   /**
    * Same as {@link #DYADIC_STRING_SUM_PRECISION} and using

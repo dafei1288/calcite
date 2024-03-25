@@ -40,6 +40,7 @@ import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexCorrelVariable;
+import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexFieldCollation;
 import org.apache.calcite.rex.RexLiteral;
@@ -578,6 +579,13 @@ public class RelJson {
   public Object toJson(RexNode node) {
     final Map<String, @Nullable Object> map;
     switch (node.getKind()) {
+    case DYNAMIC_PARAM:
+      map = jsonBuilder().map();
+      final RexDynamicParam rexDynamicParam = (RexDynamicParam) node;
+      final RelDataType rdpType = rexDynamicParam.getType();
+      map.put("dynamicParam", rexDynamicParam.getIndex());
+      map.put("type", toJson(rdpType));
+      return map;
     case FIELD_ACCESS:
       map = jsonBuilder().map();
       final RexFieldAccess fieldAccess = (RexFieldAccess) node;
@@ -622,7 +630,9 @@ public class RelJson {
         }
         map.put("operands", list);
         switch (node.getKind()) {
+        case MINUS:
         case CAST:
+        case SAFE_CAST:
           map.put("type", toJson(node.getType()));
           break;
         default:
@@ -829,6 +839,12 @@ public class RelJson {
         Sarg sarg = sargFromJson((Map) sargObject);
         return rexBuilder.makeSearchArgumentLiteral(sarg, type);
       }
+      if (map.containsKey("dynamicParam")) {
+        final Object dynamicParamObject = requireNonNull(map.get("dynamicParam"));
+        final Integer index = (Integer) dynamicParamObject;
+        final RelDataType type = toType(typeFactory, get(map, "type"));
+        return rexBuilder.makeDynamicParam(type, index);
+      }
       throw new UnsupportedOperationException("cannot convert to rex " + o);
     } else if (o instanceof Boolean) {
       return rexBuilder.makeLiteral((Boolean) o);
@@ -993,7 +1009,7 @@ public class RelJson {
     SqlSyntax sqlSyntax = SqlSyntax.valueOf(syntax);
     List<SqlOperator> operators = new ArrayList<>();
     operatorTable.lookupOperatorOverloads(
-        new SqlIdentifier(name, new SqlParserPos(0, 0)),
+        new SqlIdentifier(name, SqlParserPos.ZERO),
         null,
         sqlSyntax,
         operators,
@@ -1100,6 +1116,10 @@ public class RelJson {
     }
 
     @Override public float getFloat(String tag) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override public BigDecimal getBigDecimal(String tag) {
       throw new UnsupportedOperationException();
     }
 

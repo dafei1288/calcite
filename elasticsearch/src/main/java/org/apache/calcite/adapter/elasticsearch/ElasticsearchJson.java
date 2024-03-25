@@ -98,7 +98,9 @@ final class ElasticsearchJson {
       BiConsumer<String, String> consumer) {
     Objects.requireNonNull(mapping, "mapping");
     Objects.requireNonNull(consumer, "consumer");
-    visitMappingProperties(new ArrayDeque<>(), mapping, consumer);
+    if (mapping.has("properties")) {
+      visitMappingProperties(new ArrayDeque<>(), mapping, consumer);
+    }
   }
 
   private static void visitMappingProperties(Deque<String> path,
@@ -716,7 +718,7 @@ final class ElasticsearchJson {
         throws JsonProcessingException {
 
       List<Bucket> buckets = new ArrayList<>(nodes.size());
-      for (JsonNode b: nodes) {
+      for (JsonNode b : nodes) {
         buckets.add(parseBucket(parser, name, (ObjectNode) b));
       }
 

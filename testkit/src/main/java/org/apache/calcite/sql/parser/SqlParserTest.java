@@ -21,6 +21,7 @@ import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlExplain;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlLambda;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
@@ -36,18 +37,18 @@ import org.apache.calcite.sql.test.SqlTestFactory;
 import org.apache.calcite.sql.test.SqlTests;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.util.SqlShuttle;
+import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
-import org.apache.calcite.test.DiffTestCase;
 import org.apache.calcite.test.IntervalTest;
 import org.apache.calcite.tools.Hoist;
 import org.apache.calcite.util.Bug;
 import org.apache.calcite.util.ConversionUtil;
+import org.apache.calcite.util.Litmus;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.TestUtil;
 import org.apache.calcite.util.Util;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedSet;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -65,7 +66,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import java.util.SortedSet;
-import java.util.TreeSet;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -83,8 +83,8 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.hasToString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * A <code>SqlParserTest</code> is a unit-test for
@@ -106,7 +106,7 @@ public class SqlParserTest {
    * the SQL:92, SQL:99, SQL:2003, SQL:2011, SQL:2014 standards and in Calcite.
    *
    * <p>The standard keywords are derived from
-   * <a href="https://developer.mimer.com/wp-content/uploads/2018/05/Standard-SQL-Reserved-Words-Summary.pdf">Mimer</a>
+   * <a href="https://developer.mimer.com/wp-content/uploads/standard-sql-reserved-words-summary.pdf">Mimer</a>
    * and from the specification.
    *
    * <p>If a new <b>reserved</b> keyword is added to the parser, include it in
@@ -324,6 +324,7 @@ public class SqlParserTest {
       "JSON_OBJECT",                                                       "c",
       "JSON_OBJECTAGG",                                                    "c",
       "JSON_QUERY",                                                        "c",
+      "JSON_SCOPE",                                                        "c",
       "JSON_VALUE",                                                        "c",
       "KEEP",                                              "2011",
       "KEY",                           "92", "99",
@@ -399,6 +400,7 @@ public class SqlParserTest {
       "OPTION",                        "92", "99",
       "OR",                            "92", "99", "2003", "2011", "2014", "c",
       "ORDER",                         "92", "99", "2003", "2011", "2014", "c",
+      "ORDINAL",                                                           "c",
       "ORDINALITY",                          "99",
       "OUT",                           "92", "99", "2003", "2011", "2014", "c",
       "OUTER",                         "92", "99", "2003", "2011", "2014", "c",
@@ -433,6 +435,7 @@ public class SqlParserTest {
       "PRIVILEGES",                    "92", "99",
       "PROCEDURE",                     "92", "99", "2003", "2011", "2014", "c",
       "PUBLIC",                        "92", "99",
+      "QUALIFY",                                                           "c",
       "RANGE",                               "99", "2003", "2011", "2014", "c",
       "RANK",                                              "2011", "2014", "c",
       "READ",                          "92", "99",
@@ -471,6 +474,9 @@ public class SqlParserTest {
       "ROWS",                          "92", "99", "2003", "2011", "2014", "c",
       "ROW_NUMBER",                                        "2011", "2014", "c",
       "RUNNING",                                                   "2014", "c",
+      "SAFE_CAST",                                                         "c",
+      "SAFE_OFFSET",                                                       "c",
+      "SAFE_ORDINAL",                                                      "c",
       "SATURDAY",                                                          "c",
       "SAVEPOINT",                           "99", "2003", "2011", "2014", "c",
       "SCHEMA",                        "92", "99",
@@ -543,6 +549,7 @@ public class SqlParserTest {
       "TRIM_ARRAY",                                        "2011", "2014", "c",
       "TRUE",                          "92", "99", "2003", "2011", "2014", "c",
       "TRUNCATE",                                          "2011", "2014", "c",
+      "TRY_CAST",                                                          "c",
       "TUESDAY",                                                           "c",
       "UESCAPE",                                           "2011", "2014", "c",
       "UNDER",                               "99",
@@ -719,6 +726,37 @@ public class SqlParserTest {
             + "    \"AS\" \\.\\.\\.\n"
             + "    \"EXCEPT\" \\.\\.\\.\n"
             + ".*");
+  }
+
+  /** Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-5997">[CALCITE-5997]
+   * OFFSET operator is incorrectly unparsed</a>. */
+  @Test void testOffset() {
+    sql("SELECT ARRAY[2,4,6][2]")
+        .ok("SELECT (ARRAY[2, 4, 6])[2]");
+    sql("SELECT ARRAY[2,4,6][ORDINAL(2)]")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (ARRAY[2, 4, 6])[ORDINAL(2)]");
+    sql("SELECT ARRAY[2,4,6][OFFSET(2)]")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (ARRAY[2, 4, 6])[OFFSET(2)]");
+    sql("SELECT ARRAY[2,4,6][SAFE_OFFSET(2)]")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (ARRAY[2, 4, 6])[SAFE_OFFSET(2)]");
+    sql("SELECT ARRAY[2,4,6][SAFE_ORDINAL(2)]")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT (ARRAY[2, 4, 6])[SAFE_ORDINAL(2)]");
+
+    // All these tests work without BIG_QUERY as well.
+    // The SQL parser accepts this syntax, so we need to be
+    // able to unparse it into something.
+    sql("SELECT ARRAY[2,4,6][ORDINAL(2)]")
+        .ok("SELECT (ARRAY[2, 4, 6])[ORDINAL(2)]");
+    sql("SELECT ARRAY[2,4,6][OFFSET(2)]")
+        .ok("SELECT (ARRAY[2, 4, 6])[OFFSET(2)]");
+    sql("SELECT ARRAY[2,4,6][SAFE_OFFSET(2)]")
+        .ok("SELECT (ARRAY[2, 4, 6])[SAFE_OFFSET(2)]");
+    sql("SELECT ARRAY[2,4,6][SAFE_ORDINAL(2)]")
+        .ok("SELECT (ARRAY[2, 4, 6])[SAFE_ORDINAL(2)]");
   }
 
   @Test void testInvalidToken() {
@@ -904,6 +942,53 @@ public class SqlParserTest {
         .ok(expected)
         .withDialect(BIG_QUERY)
         .ok(expectedBigQuery);
+  }
+
+  @Test void testDecimalLiteral() {
+    sql("select DECIMAL '99.999'")
+        .ok("SELECT 99.999");
+    sql("select DECIMAL '   99.999'")
+        .ok("SELECT 99.999");
+    sql("select DECIMAL '   99.999   '")
+        .ok("SELECT 99.999");
+    sql("select DECIMAL '+99.999'")
+        .ok("SELECT 99.999");
+    sql("select DECIMAL '-99.999'")
+        .ok("SELECT -99.999");
+    sql("select DECIMAL'-99.999'")
+        .ok("SELECT -99.999");
+    sql("select DECIMAL'99.999'")
+        .ok("SELECT 99.999");
+    sql("select DECIMAL'.999'")
+        .ok("SELECT 0.999");
+    sql("select DECIMAL'999.'")
+        .ok("SELECT 999");
+    sql("select DECIMAL'999'")
+        .ok("SELECT 999");
+    sql("select DECIMAL '2.11E-2'")
+        .ok("SELECT 0.0211");
+    sql("select DECIMAL '2.11E2'")
+        .ok("SELECT 211");
+    sql("select DECIMAL '.11E-2'")
+        .ok("SELECT 0.0011");
+    // Test case for [CALCITE-5999] DECIMAL literals as sometimes unparsed
+    // looking as DOUBLE literals.
+    sql("select DECIMAL '0.00000000000000001'")
+        .ok("SELECT 0.00000000000000001");
+    sql("select DECIMAL ^''^")
+        .fails("(?s)Literal '' can not be parsed to type 'DECIMAL'.*");
+    sql("select DECIMAL ^'-'^")
+        .fails("(?s)Literal '-' can not be parsed to type 'DECIMAL'.*");
+    sql("select DECIMAL ^'foo'^")
+        .fails("(?s)Literal 'foo' can not be parsed to type 'DECIMAL'.*");
+
+    // Test with bigquery
+    sql("select DECIMAL \"2.11E-2\"")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT 0.0211");
+    sql("select DECIMAL \"999\"")
+        .withDialect(BIG_QUERY)
+        .ok("SELECT 999");
   }
 
   @Test void testDerivedColumnList() {
@@ -1148,6 +1233,20 @@ public class SqlParserTest {
     // Therefore, we only support != with certain SQL conformance levels.
     expr("'abc'^!=^123")
         .fails("Bang equal '!=' is not allowed under the current SQL conformance level");
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6178">[CALCITE-6178]
+   * WITH RECURSIVE query when cloned using sqlshuttle looses RECURSIVE property</a>. */
+  @Test void testRecursiveQueryCloned() throws Exception {
+    SqlNode sqlNode = sql("with RECURSIVE emp2 as "
+        + "(select * from emp union select * from emp2) select * from emp2").parser().parseStmt();
+    SqlNode sqlNode1 = sqlNode.accept(new SqlShuttle() {
+      @Override public SqlNode visit(SqlIdentifier identifier) {
+        return new SqlIdentifier(identifier.names, identifier.getParserPosition());
+      }
+    });
+    assertTrue(sqlNode.equalsDeep(sqlNode1, Litmus.IGNORE));
   }
 
   @Test void testBetween() {
@@ -1684,7 +1783,7 @@ public class SqlParserTest {
         .ok("CEIL((`X` + INTERVAL '1:20' MINUTE TO SECOND) TO MILLENNIUM)");
   }
 
-  @Test void testCast() {
+  @Test public void testCast() {
     expr("cast(x as boolean)")
         .ok("CAST(`X` AS BOOLEAN)");
     expr("cast(x as integer)")
@@ -1699,10 +1798,14 @@ public class SqlParserTest {
         .ok("CAST(`X` AS TIME)");
     expr("cast(x as time with local time zone)")
         .ok("CAST(`X` AS TIME WITH LOCAL TIME ZONE)");
+    expr("cast(x as time with time zone)")
+        .ok("CAST(`X` AS TIME WITH TIME ZONE)");
     expr("cast(x as timestamp without time zone)")
         .ok("CAST(`X` AS TIMESTAMP)");
     expr("cast(x as timestamp with local time zone)")
         .ok("CAST(`X` AS TIMESTAMP WITH LOCAL TIME ZONE)");
+    expr("cast(x as timestamp with time zone)")
+        .ok("CAST(`X` AS TIMESTAMP WITH TIME ZONE)");
     expr("cast(x as time(0))")
         .ok("CAST(`X` AS TIME(0))");
     expr("cast(x as time(0) without time zone)")
@@ -1747,14 +1850,6 @@ public class SqlParserTest {
   }
 
   @Test void testCastFails() {
-    expr("cast(x as time with ^time^ zone)")
-        .fails("(?s).*Encountered \"time\" at .*");
-    expr("cast(x as time(0) with ^time^ zone)")
-        .fails("(?s).*Encountered \"time\" at .*");
-    expr("cast(x as timestamp with ^time^ zone)")
-        .fails("(?s).*Encountered \"time\" at .*");
-    expr("cast(x as timestamp(0) with ^time^ zone)")
-        .fails("(?s).*Encountered \"time\" at .*");
     expr("cast(x as varchar(10) ^with^ local time zone)")
         .fails("(?s).*Encountered \"with\" at line 1, column 23.\n.*");
     expr("cast(x as varchar(10) ^without^ time zone)")
@@ -2333,6 +2428,58 @@ public class SqlParserTest {
     final String expected = "SELECT `DEPTNO`, GROUPING(`DEPTNO`)\n"
         + "FROM `EMP`\n"
         + "GROUP BY GROUPING SETS(`DEPTNO`, (`DEPTNO`, `GENDER`), ())";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testWithRecursive() {
+    final String sql = "WITH RECURSIVE aux(i) AS (\n"
+        + "  VALUES (1)\n"
+        + "  UNION ALL\n"
+        + "  SELECT i+1 FROM aux WHERE i < 10\n"
+        + "  )\n"
+        + "  SELECT * FROM aux";
+    final String expected = "WITH RECURSIVE `AUX` (`I`) AS ((VALUES (ROW(1)))\n"
+        + "UNION ALL\n"
+        + "SELECT (`I` + 1)\n"
+        + "FROM `AUX`\n"
+        + "WHERE (`I` < 10)) SELECT *\n"
+        + "FROM `AUX`";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testMultipleWithRecursive() {
+    final String sql = "WITH RECURSIVE a(x) AS\n"
+        + "  (SELECT 1),\n"
+        + "               b(y) AS\n"
+        + "  (SELECT x\n"
+        + "   FROM a\n"
+        + "   UNION ALL SELECT y + 1\n"
+        + "   FROM b\n"
+        + "   WHERE y < 2),\n"
+        + "               c(z) AS\n"
+        + "  (SELECT y\n"
+        + "   FROM b\n"
+        + "   UNION ALL SELECT z * 4\n"
+        + "   FROM c\n"
+        + "   WHERE z < 4 )\n"
+        + "SELECT *\n"
+        + "FROM a,\n"
+        + "     b,\n"
+        + "     c";
+    final String expected = "WITH RECURSIVE `A` (`X`) AS (SELECT 1), `B` (`Y`) AS (SELECT `X`\n"
+        + "FROM `A`\n"
+        + "UNION ALL\n"
+        + "SELECT (`Y` + 1)\n"
+        + "FROM `B`\n"
+        + "WHERE (`Y` < 2)), `C` (`Z`) AS (SELECT `Y`\n"
+        + "FROM `B`\n"
+        + "UNION ALL\n"
+        + "SELECT (`Z` * 4)\n"
+        + "FROM `C`\n"
+        + "WHERE (`Z` < 4)) SELECT *\n"
+        + "FROM `A`,\n"
+        + "`B`,\n"
+        + "`C`";
     sql(sql).ok(expected);
   }
 
@@ -3265,10 +3412,9 @@ public class SqlParserTest {
         .ok(expected);
   }
 
-  /** Even in SQL Server conformance mode, we do not yet support
-   * 'function(args)' as an abbreviation for 'table(function(args)'. */
+  /** We now support 'function(args)' as an abbreviation for 'table(function(args)'. */
   @Test void testOuterApplyFunctionFails() {
-    final String sql = "select * from dept outer apply ramp(deptno^)^)";
+    final String sql = "select * from dept outer apply ramp(deptno)^)^";
     sql(sql)
         .withConformance(SqlConformanceEnum.SQL_SERVER_2008)
         .fails("(?s).*Encountered \"\\)\" at .*");
@@ -3336,6 +3482,20 @@ public class SqlParserTest {
         + "tablesample bernoulli(50) REPEATABLE(-^100000000000000000000^) ")
         .fails("Literal '100000000000000000000' "
             + "can not be parsed to type 'java\\.lang\\.Integer'");
+
+    // test bernoulli sample percentage with zero.
+    final String sql4 = "select * "
+        + "from emp as x tablesample bernoulli(0)";
+    final String expected4 = "SELECT *\n"
+        + "FROM `EMP` AS `X` TABLESAMPLE BERNOULLI(0)";
+    sql(sql4).ok(expected4);
+
+    // test system sample percentage with zero.
+    final String sql5 = "select * "
+        + "from emp as x tablesample system(0)";
+    final String expected5 = "SELECT *\n"
+        + "FROM `EMP` AS `X` TABLESAMPLE SYSTEM(0)";
+    sql(sql5).ok(expected5);
   }
 
   @Test void testLiteral() {
@@ -3730,11 +3890,6 @@ public class SqlParserTest {
     sql("select a from foo limit 2,3 ^fetch^ next 4 rows only")
         .withConformance(SqlConformanceEnum.LENIENT)
         .fails("(?s).*Encountered \"fetch\" at line 1.*");
-
-    // "limit start, all" is not valid
-    sql("select a from foo limit 2, ^all^")
-        .withConformance(SqlConformanceEnum.LENIENT)
-        .fails("(?s).*Encountered \"all\" at line 1.*");
   }
 
   /** Test case for
@@ -3768,11 +3923,44 @@ public class SqlParserTest {
     sql("select a from foo offset 2 limit 3 ^fetch^ next 4 rows only")
         .withConformance(SqlConformanceEnum.LENIENT)
         .fails("(?s).*Encountered \"fetch\" at line 1.*");
+  }
 
-    // "limit start, all" is not valid
-    sql("select a from foo offset 1 limit 2, ^all^")
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-5184">[CALCITE-5184]
+   * Support "LIMIT start, ALL" (in MySQL conformance)</a>.
+   *
+   * @see SqlConformance#isLimitStartCountAllowed() */
+  @Test void testLimitStartAll() {
+    String expected = "SELECT `A`\n"
+        + "FROM `FOO`\n"
+        + "OFFSET 2 ROWS";
+    sql("select a from foo ^limit 2, all^")
+        .withConformance(SqlConformanceEnum.DEFAULT)
+        .fails("'LIMIT start, ALL' is not allowed under the "
+            + "current SQL conformance level")
+        .withConformance(SqlConformanceEnum.MYSQL_5)
+        .ok(expected)
         .withConformance(SqlConformanceEnum.LENIENT)
-        .fails("(?s).*Encountered \"all\" at line 1.*");
+        .ok(expected);
+
+    // 'limit 2, all' will override 'offset 1' (if allowed by conformance)
+    sql("select a from foo ^offset 1 limit 2, all^")
+        .withConformance(SqlConformanceEnum.DEFAULT)
+        .fails("'LIMIT start, ALL' is not allowed under the "
+            + "current SQL conformance level")
+        .withConformance(SqlConformanceEnum.MYSQL_5)
+        .fails("'OFFSET start LIMIT count' is not allowed under the "
+            + "current SQL conformance level")
+        .withConformance(SqlConformanceEnum.LENIENT)
+        .ok(expected);
+
+    // 'offset 1' will override 'limit 2, all'
+    String expected2 = "SELECT `A`\n"
+        + "FROM `FOO`\n"
+        + "OFFSET 1 ROWS";
+    sql("select a from foo limit 2, all offset 1")
+        .withConformance(SqlConformanceEnum.LENIENT)
+        .ok(expected2);
   }
 
   @Test void testSqlInlineComment() {
@@ -4399,8 +4587,15 @@ public class SqlParserTest {
     sql(sql).ok(expected);
   }
 
-  @Test void testTableFunction() {
+  @Test void testTableFunctionWithTableWrapper() {
     final String sql = "select * from table(score(table orders))";
+    final String expected = "SELECT *\n"
+        + "FROM TABLE(`SCORE`((TABLE `ORDERS`)))";
+    sql(sql).ok(expected);
+  }
+
+  @Test void testTableFunctionWithoutTableWrapper() {
+    final String sql = "select * from score(table orders)";
     final String expected = "SELECT *\n"
         + "FROM TABLE(`SCORE`((TABLE `ORDERS`)))";
     sql(sql).ok(expected);
@@ -5351,8 +5546,11 @@ public class SqlParserTest {
     expr("^DATE '12/21/99'^").same();
     expr("^TIME '1230:33'^").same();
     expr("^TIME '12:00:00 PM'^").same();
+    expr("^TIME WITH LOCAL TIME ZONE '12:00:00 PM'^").same();
+    expr("^TIME WITH TIME ZONE '12:00:00 PM GMT+0:00'^").same();
     expr("TIMESTAMP '12-21-99, 12:30:00'").same();
     expr("TIMESTAMP WITH LOCAL TIME ZONE '12-21-99, 12:30:00'").same();
+    expr("TIMESTAMP WITH TIME ZONE '12-21-99, 12:30:00 GMT+0:00'").same();
     expr("DATETIME '12-21-99, 12:30:00'").same();
   }
 
@@ -5402,16 +5600,25 @@ public class SqlParserTest {
             + "FROM `T`");
 
     expr("convert('abc' using utf8)")
-        .ok("TRANSLATE('abc', `UTF8`)");
+        .ok("TRANSLATE('abc' USING `UTF8`)");
     sql("select convert(name using gbk) as newName from t")
-        .ok("SELECT TRANSLATE(`NAME`, `GBK`) AS `NEWNAME`\n"
+        .ok("SELECT TRANSLATE(`NAME` USING `GBK`) AS `NEWNAME`\n"
             + "FROM `T`");
 
     expr("translate('abc' using lazy_translation)")
-        .ok("TRANSLATE('abc', `LAZY_TRANSLATION`)");
+        .ok("TRANSLATE('abc' USING `LAZY_TRANSLATION`)");
     sql("select translate(name using utf8) as newName from t")
-        .ok("SELECT TRANSLATE(`NAME`, `UTF8`) AS `NEWNAME`\n"
+        .ok("SELECT TRANSLATE(`NAME` USING `UTF8`) AS `NEWNAME`\n"
             + "FROM `T`");
+
+    // Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-5996">[CALCITE-5996]</a>
+    // TRANSLATE operator is incorrectly unparsed
+    sql("select translate(col using utf8)\n"
+        + "from (select 'a' as col\n"
+        + " from (values(true)))\n")
+        .ok("SELECT TRANSLATE(`COL` USING `UTF8`)\n"
+            + "FROM (SELECT 'a' AS `COL`\n"
+            + "FROM (VALUES (ROW(TRUE))))");
   }
 
   @Test void testTranslate3() {
@@ -5831,6 +6038,18 @@ public class SqlParserTest {
             + "FROM `T`)))");
   }
 
+  @Test void testMultisetQueryConstructor() {
+    sql("SELECT multiset(SELECT x FROM (VALUES(1)) x)")
+        .ok("SELECT (MULTISET ((SELECT `X`\n"
+            + "FROM (VALUES (ROW(1))) AS `X`)))");
+    sql("SELECT multiset(SELECT x FROM (VALUES(1)) x ^ORDER^ BY x)")
+        .fails("(?s)Encountered \"ORDER\" at.*");
+    sql("SELECT multiset(SELECT x FROM (VALUES(1)) x, ^SELECT^ x FROM (VALUES(1)) x)")
+        .fails("(?s)Incorrect syntax near the keyword 'SELECT' at.*");
+    sql("SELECT multiset(^1^, SELECT x FROM (VALUES(1)) x)")
+        .fails("(?s)Non-query expression encountered in illegal context");
+  }
+
   @Test void testMultisetUnion() {
     expr("a multiset union b")
         .ok("(`A` MULTISET UNION ALL `B`)");
@@ -5990,6 +6209,20 @@ public class SqlParserTest {
         .ok("CAST(`A` AS ROW(`F0` VARCHAR, `F1` TIMESTAMP NULL) MULTISET)");
   }
 
+  /**
+   * Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-5570">[CALCITE-5570]
+   * Support nested map type for SqlDataTypeSpec</a>.
+   */
+  @Test void testCastAsMapType() {
+    expr("cast(a as map<int, int>)")
+        .ok("CAST(`A` AS MAP< INTEGER, INTEGER >)");
+    expr("cast(a as map<int, varchar array>)")
+        .ok("CAST(`A` AS MAP< INTEGER, VARCHAR ARRAY >)");
+    expr("cast(a as map<varchar multiset, map<int, int>>)")
+        .ok("CAST(`A` AS MAP< VARCHAR MULTISET, MAP< INTEGER, INTEGER > >)");
+  }
+
   @Test void testMapValueConstructor() {
     expr("map[1, 'x', 2, 'y']")
         .ok("(MAP[1, 'x', 2, 'y'])");
@@ -5997,6 +6230,49 @@ public class SqlParserTest {
         .ok("(MAP[1, 'x', 2, 'y'])");
     expr("map[]")
         .ok("(MAP[])");
+  }
+
+  @Test void testMapFunction() {
+    expr("map()").ok("MAP()");
+    expr("MAP()").same();
+    // parser allows odd elements; validator will reject it
+    expr("map(1)").ok("MAP(1)");
+    expr("map(1, 'x', 2, 'y')")
+        .ok("MAP(1, 'x', 2, 'y')");
+    // with upper case
+    expr("MAP(1, 'x', 2, 'y')").same();
+    // with space
+    expr("map (1, 'x', 2, 'y')")
+        .ok("MAP(1, 'x', 2, 'y')");
+  }
+
+  @Test void testMapQueryConstructor() {
+    // parser allows odd elements; validator will reject it
+    sql("SELECT map(SELECT 1)")
+        .ok("SELECT (MAP ((SELECT 1)))");
+    sql("SELECT map(SELECT 1, 2)")
+        .ok("SELECT (MAP ((SELECT 1, 2)))");
+    // with upper case
+    sql("SELECT MAP(SELECT 1, 2)")
+        .ok("SELECT (MAP ((SELECT 1, 2)))");
+    // with space
+    sql("SELECT map (SELECT 1, 2)")
+        .ok("SELECT (MAP ((SELECT 1, 2)))");
+    sql("SELECT map(SELECT T.x, T.y FROM (VALUES(1, 2)) AS T(x, y))")
+        .ok("SELECT (MAP ((SELECT `T`.`X`, `T`.`Y`\n"
+            + "FROM (VALUES (ROW(1, 2))) AS `T` (`X`, `Y`))))");
+    // with order by
+    // note: map subquery is not sql standard, parser allows order by,
+    // but has no sorting effect in runtime (sort will be removed)
+    sql("SELECT map(SELECT T.x, T.y FROM (VALUES(1, 2) ORDER BY T.x) AS T(x, y))")
+        .ok("SELECT (MAP ((SELECT `T`.`X`, `T`.`Y`\n"
+            + "FROM (VALUES (ROW(1, 2))\n"
+            + "ORDER BY `T`.`X`) AS `T` (`X`, `Y`))))");
+
+    sql("SELECT map(1, ^SELECT^ x FROM (VALUES(1)) x)")
+        .fails("(?s)Incorrect syntax near the keyword 'SELECT'.*");
+    sql("SELECT map(SELECT x FROM (VALUES(1)) x, ^SELECT^ x FROM (VALUES(1)) x)")
+        .fails("(?s)Incorrect syntax near the keyword 'SELECT' at.*");
   }
 
   @Test void testVisitSqlInsertWithSqlShuttle() {
@@ -6905,7 +7181,6 @@ public class SqlParserTest {
 
   @Test void testParensInFrom() {
     // UNNEST may not occur within parentheses.
-    // FIXME should fail at "unnest"
     sql("select *from (^unnest(x)^)")
         .fails("Expected query or join");
 
@@ -7209,39 +7484,6 @@ public class SqlParserTest {
     String jdbcKeywords = metadata.getJdbcKeywords();
     assertThat(jdbcKeywords.contains(",COLLECT,"), is(true));
     assertThat(!jdbcKeywords.contains(",SELECT,"), is(true));
-  }
-
-  /**
-   * Tests that reserved keywords are not added to the parser unintentionally.
-   * (Most keywords are non-reserved. The set of reserved words generally
-   * only changes with a new version of the SQL standard.)
-   *
-   * <p>If the new keyword added is intended to be a reserved keyword, update
-   * the {@link #RESERVED_KEYWORDS} list. If not, add the keyword to the
-   * non-reserved keyword list in the parser.
-   */
-  @Test void testNoUnintendedNewReservedKeywords() {
-    assumeTrue(isNotSubclass(), "don't run this test for sub-classes");
-    final SqlAbstractParserImpl.Metadata metadata =
-        fixture().parser().getMetadata();
-
-    final SortedSet<String> reservedKeywords = new TreeSet<>();
-    final SortedSet<String> keywords92 = keywords("92");
-    for (String s : metadata.getTokens()) {
-      if (metadata.isKeyword(s) && metadata.isReservedWord(s)) {
-        reservedKeywords.add(s);
-      }
-      // Check that the parser's list of SQL:92
-      // reserved words is consistent with keywords("92").
-      assertThat(s, metadata.isSql92ReservedWord(s),
-          is(keywords92.contains(s)));
-    }
-
-    final String reason = "The parser has at least one new reserved keyword. "
-        + "Are you sure it should be reserved? Difference:\n"
-        + DiffTestCase.diffLines(ImmutableList.copyOf(getReservedKeywords()),
-        ImmutableList.copyOf(reservedKeywords));
-    assertThat(reason, reservedKeywords, is(getReservedKeywords()));
   }
 
   @Test void testTabStop() {
@@ -8578,6 +8820,16 @@ public class SqlParserTest {
         .ok("JSON_OBJECT(KEY 'foo' VALUE "
             + "JSON_OBJECT(KEY 'foo' VALUE 'bar' NULL ON NULL) "
             + "FORMAT JSON NULL ON NULL)");
+    expr("json_object('foo', 'bar')")
+        .ok("JSON_OBJECT(KEY 'foo' VALUE 'bar' NULL ON NULL)");
+    expr("json_object('foo', 'bar', 'baz', 'qux')")
+        .ok("JSON_OBJECT(KEY 'foo' VALUE 'bar', KEY 'baz' VALUE 'qux' NULL ON NULL)");
+    expr("json_object('foo', json_object('bar': 'baz') format json)")
+        .ok("JSON_OBJECT(KEY 'foo' VALUE "
+            + "JSON_OBJECT(KEY 'bar' VALUE 'baz' NULL ON NULL) "
+            + "FORMAT JSON NULL ON NULL)");
+    expr("json_object('foo', 'bar', 'baz'^)^")
+        .fails("(?s)Encountered \"\\)\".*Was expecting.*");
 
     if (!Bug.TODO_FIXED) {
       return;
@@ -8660,6 +8912,14 @@ public class SqlParserTest {
         .ok("JSON_OBJECTAGG(KEY `K_COLUMN` VALUE "
             + "JSON_OBJECT(KEY `K_COLUMN` VALUE `V_COLUMN` NULL ON NULL) "
             + "FORMAT JSON NULL ON NULL)");
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6003">[CALCITE-6003]
+   * JSON_ARRAY() with no arguments does not unparse correctly</a>. */
+  @Test void testEmptyJsonArray() {
+    expr("json_array()")
+        .ok("JSON_ARRAY()");
   }
 
   @Test void testJsonArray() {
@@ -9006,6 +9266,46 @@ public class SqlParserTest {
     assertThat(hoisted.substitute(SqlParserTest::varToStr), is(expected2));
   }
 
+  /** Tests {@link SqlLambda}. */
+  @Test public void testLambdaExpression() {
+    sql("select higher_order_func(1, (x, y) -> (x + y)) from t")
+        .ok("SELECT `HIGHER_ORDER_FUNC`(1, (`X`, `Y`) -> (`X` + `Y`))\n"
+            + "FROM `T`");
+
+    sql("select higher_order_func(1, (x, y) -> x + char_length(y)) from t")
+        .ok("SELECT `HIGHER_ORDER_FUNC`(1, (`X`, `Y`) -> (`X` + CHAR_LENGTH(`Y`)))\n"
+            + "FROM `T`");
+
+    sql("select higher_order_func(a -> a + 1, 1) from t")
+        .ok("SELECT `HIGHER_ORDER_FUNC`(`A` -> (`A` + 1), 1)\n"
+            + "FROM `T`");
+
+    sql("select higher_order_func((a) -> 1, 1) from t")
+        .ok("SELECT `HIGHER_ORDER_FUNC`(`A` -> 1, 1)\n"
+            + "FROM `T`");
+
+    sql("select higher_order_func(() -> 1 + 1, 1) from t")
+        .ok("SELECT `HIGHER_ORDER_FUNC`(() -> (1 + 1), 1)\n"
+            + "FROM `T`");
+
+    final String errorMessage1 = "(?s).*Encountered \"\\)\" at .*";
+    sql("select (^)^ -> 1")
+        .fails(errorMessage1);
+
+    sql("select * from t where (^)^ -> a = 1")
+        .fails(errorMessage1);
+
+    final String errorMessage2 = "(?s).*Encountered \"->\" at .*";
+    sql("select (a, b) ^->^ a + b")
+        .fails(errorMessage2);
+
+    sql("select * from t where (a, b) ^->^ a = 1")
+        .fails(errorMessage2);
+
+    sql("select 1 || (a, b) ^->^ a + b")
+        .fails(errorMessage2);
+  }
+
   protected static String varToStr(Hoist.Variable v) {
     if (v.node instanceof SqlLiteral) {
       SqlLiteral literal = (SqlLiteral) v.node;
@@ -9196,10 +9496,6 @@ public class SqlParserTest {
       SqlTests.checkEx(thrown, expectedMsgPattern, sap,
           SqlTests.Stage.VALIDATE);
     }
-  }
-
-  private boolean isNotSubclass() {
-    return this.getClass().equals(SqlParserTest.class);
   }
 
   /**

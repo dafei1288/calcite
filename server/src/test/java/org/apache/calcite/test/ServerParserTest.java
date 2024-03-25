@@ -56,6 +56,13 @@ class ServerParserTest extends SqlParserTest {
         .ok("CREATE SCHEMA `X`");
   }
 
+  @Test void testProcessCreateTableWithDefault() {
+    String sql = "create table tdef (i int not null, j int default 100)";
+    String expected = "CREATE TABLE `TDEF` (`I` INTEGER NOT NULL,"
+        + " `J` INTEGER DEFAULT 100)";
+    sql(sql).ok(expected);
+  }
+
   @Test void testCreateOrReplaceSchema() {
     sql("create or replace schema x")
         .ok("CREATE OR REPLACE SCHEMA `X`");
@@ -174,6 +181,36 @@ class ServerParserTest extends SqlParserTest {
     sql(sql).ok(expected);
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6022">[CALCITE-6022]
+   * Support "CREATE TABLE ... LIKE" DDL in server module</a>. */
+  @Test void testCreateTableLike() {
+    final String sql = "create table x like y";
+    final String expected = "CREATE TABLE `X` LIKE `Y`";
+    sql(sql).ok(expected);
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6022">[CALCITE-6022]
+   * Support "CREATE TABLE ... LIKE" DDL in server module</a>. */
+  @Test void testCreateTableLikeWithOptions() {
+    sql("create table x like y including all")
+        .ok("CREATE TABLE `X` LIKE `Y`\n"
+            + "INCLUDING ALL");
+
+    sql("create table s.x like s.y excluding defaults including generated")
+        .ok("CREATE TABLE `S`.`X` LIKE `S`.`Y`\n"
+            + "INCLUDING GENERATED\n"
+            + "EXCLUDING DEFAULTS");
+
+    sql("create table x like y excluding defaults including all")
+        .fails("ALL cannot be used with other options");
+
+    sql("create table x like y including defaults excluding defaults")
+        .fails("Cannot include and exclude option DEFAULTS at same time");
+
+  }
+
   @Test void testCreateView() {
     final String sql = "create or replace view v as\n"
         + "select * from (values (1, '2'), (3, '45')) as t (x, y)";
@@ -285,6 +322,17 @@ class ServerParserTest extends SqlParserTest {
   @Test void testDropTableIfExists() {
     sql("drop table if exists x")
         .ok("DROP TABLE IF EXISTS `X`");
+  }
+
+  @Test void testTruncateTable() {
+    sql("truncate table x")
+        .ok("TRUNCATE TABLE `X` CONTINUE IDENTITY");
+
+    sql("truncate table x continue identity")
+        .ok("TRUNCATE TABLE `X` CONTINUE IDENTITY");
+
+    sql("truncate table x restart identity")
+        .ok("TRUNCATE TABLE `X` RESTART IDENTITY");
   }
 
   @Test void testDropView() {

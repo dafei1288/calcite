@@ -63,11 +63,16 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
+
+import static com.google.common.collect.ImmutableList.toImmutableList;
+
+import static org.apache.calcite.rel.type.RelDataType.PRECISION_NOT_SPECIFIED;
 
 import static java.util.Objects.requireNonNull;
 
@@ -639,7 +644,7 @@ public class RexUtil {
               rexBuilder.makeCall(SqlStdOperatorTable.NOT_EQUALS, ref,
                   rexBuilder.makeLiteral(range.lowerEndpoint(),
                       type, true, true)))
-          .collect(Util.toImmutableList());
+          .collect(toImmutableList());
       orList.add(composeConjunction(rexBuilder, list));
     } else {
       final RangeSets.Consumer<C> consumer =
@@ -761,6 +766,14 @@ public class RexUtil {
     @Override public Boolean visitFieldAccess(RexFieldAccess fieldAccess) {
       // "<expr>.FIELD" is constant iff "<expr>" is constant.
       return fieldAccess.getReferenceExpr().accept(this);
+    }
+
+    @Override public Boolean visitLambda(RexLambda lambda) {
+      return false;
+    }
+
+    @Override public Boolean visitLambdaRef(RexLambdaRef lambdaRef) {
+      return false;
     }
   }
 
@@ -1694,7 +1707,8 @@ public class RexUtil {
       if (source.getScale() != -1 && source.getScale() != 0) {
         sourceLength += source.getScale() + 1; // include decimal mark
       }
-      return target.getPrecision() >= sourceLength;
+      final int targetPrecision = target.getPrecision();
+      return targetPrecision == PRECISION_NOT_SPECIFIED || targetPrecision >= sourceLength;
     }
     // Return FALSE by default
     return false;
@@ -2669,8 +2683,9 @@ public class RexUtil {
       return list;
     }
 
-    private static Map<RexNode, RexNode> commonFactors(List<RexNode> nodes) {
-      final Map<RexNode, RexNode> map = new HashMap<>();
+    private static LinkedHashMap<RexNode, RexNode> commonFactors(List<RexNode> nodes) {
+      // make sure the result is in deterministic order
+      final LinkedHashMap<RexNode, RexNode> map = new LinkedHashMap<>();
       int i = 0;
       for (RexNode node : nodes) {
         if (i++ == 0) {
@@ -2836,6 +2851,29 @@ public class RexUtil {
         return new RexInputRef(ref.getIndex(), refType2);
       }
       throw new AssertionError("mismatched type " + ref + " " + rightType);
+    }
+  }
+
+  /** Visitor that collects all the top level SubQueries {@link RexSubQuery}
+   *  in a projection list of a given {@link Project}.*/
+  public static class SubQueryCollector extends RexVisitorImpl<Void> {
+    private List<RexSubQuery> subQueries;
+    private SubQueryCollector() {
+      super(true);
+      this.subQueries = new ArrayList<>();
+    }
+
+    @Override public Void visitSubQuery(RexSubQuery subQuery) {
+      subQueries.add(subQuery);
+      return null;
+    }
+
+    public static List<RexSubQuery> collect(Project project) {
+      SubQueryCollector subQueryCollector = new SubQueryCollector();
+      for (RexNode node : project.getProjects()) {
+        node.accept(subQueryCollector);
+      }
+      return subQueryCollector.subQueries;
     }
   }
 

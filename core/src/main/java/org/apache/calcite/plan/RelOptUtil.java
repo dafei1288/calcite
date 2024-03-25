@@ -80,6 +80,7 @@ import org.apache.calcite.rex.RexToSqlNodeConverterImpl;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.runtime.CalciteContextException;
+import org.apache.calcite.runtime.PairList;
 import org.apache.calcite.schema.ModifiableView;
 import org.apache.calcite.sql.SqlExplainFormat;
 import org.apache.calcite.sql.SqlExplainLevel;
@@ -194,6 +195,13 @@ public abstract class RelOptUtil {
   }
 
   /**
+   * Whether this node contains a offset specification.
+   */
+  public static boolean isOffset(RelNode rel) {
+    return (rel instanceof Sort) && ((Sort) rel).offset != null;
+  }
+
+  /**
    * Returns a set of tables used by this expression or its children.
    */
   public static Set<RelOptTable> findTables(RelNode rel) {
@@ -263,7 +271,7 @@ public abstract class RelOptUtil {
   }
 
   /**
-   * Returns a set of variables used by a relational expression or its
+   * Returns the set of variables used by a relational expression or its
    * descendants.
    *
    * <p>The set may contain "duplicates" (variables with different ids that,
@@ -276,6 +284,24 @@ public abstract class RelOptUtil {
     CorrelationCollector visitor = new CorrelationCollector();
     rel.accept(visitor);
     return visitor.vuv.variables;
+  }
+
+  /**
+   * Returns the set of variables used by the given list of sub-queries and its descendants.
+   *
+   * @param subQueries The sub-queries containing correlation variables
+   * @return A list of correlation identifiers found within the sub-queries.
+   *          The type of the [CorrelationId] parameter corresponds to
+   *          {@link org.apache.calcite.rex.RexCorrelVariable#id}.
+   */
+  public static Set<CorrelationId> getVariablesUsed(List<RexSubQuery> subQueries) {
+    // Internally this function calls getVariablesUsed on a RelNode to get all the
+    // correlated variables in that RelNode
+    Set<CorrelationId> correlationIds = new HashSet<>();
+    for (RexSubQuery subQ : subQueries) {
+      correlationIds.addAll(getVariablesUsed(subQ.rel));
+    }
+    return correlationIds;
   }
 
   /** Finds which columns of a correlation variable are used within a
@@ -726,23 +752,19 @@ public abstract class RelOptUtil {
         : "rename: field count mismatch: in=" + inputType
         + ", out" + outputType;
 
-    final List<Pair<RexNode, String>> renames = new ArrayList<>();
-    for (Pair<RelDataTypeField, RelDataTypeField> pair
-        : Pair.zip(inputFields, outputFields)) {
-      final RelDataTypeField inputField = pair.left;
-      final RelDataTypeField outputField = pair.right;
+    final PairList<RexNode, String> renames = PairList.of();
+    final RexBuilder rexBuilder = rel.getCluster().getRexBuilder();
+    Pair.forEach(inputFields, outputFields, (inputField, outputField) -> {
       assert inputField.getType().equals(outputField.getType());
-      final RexBuilder rexBuilder = rel.getCluster().getRexBuilder();
       renames.add(
-          Pair.of(
-              rexBuilder.makeInputRef(inputField.getType(),
-                  inputField.getIndex()),
-              outputField.getName()));
-    }
+          rexBuilder.makeInputRef(inputField.getType(),
+              inputField.getIndex()),
+          outputField.getName());
+    });
     final RelBuilder relBuilder =
         RelFactories.LOGICAL_BUILDER.create(rel.getCluster(), null);
     return relBuilder.push(rel)
-        .project(Pair.left(renames), Pair.right(renames), true)
+        .project(renames.leftList(), renames.rightList(), true)
         .build();
   }
 
@@ -1959,23 +1981,22 @@ public abstract class RelOptUtil {
     // If no projection was passed in, or the number of desired projection
     // columns is the same as the number of columns returned from the
     // join, then no need to create a projection
-    if ((newProjectOutputSize > 0)
-        && (newProjectOutputSize < joinOutputFields.size())) {
-      final List<Pair<RexNode, String>> newProjects = new ArrayList<>();
+    if (newProjectOutputSize > 0
+        && newProjectOutputSize < joinOutputFields.size()) {
+      final PairList<RexNode, String> newProjects = PairList.of();
       final RelBuilder relBuilder =
           RelFactories.LOGICAL_BUILDER.create(joinRel.getCluster(), null);
       final RexBuilder rexBuilder = relBuilder.getRexBuilder();
       for (int fieldIndex : outputProj) {
         final RelDataTypeField field = joinOutputFields.get(fieldIndex);
         newProjects.add(
-            Pair.of(
-                rexBuilder.makeInputRef(field.getType(), fieldIndex),
-                field.getName()));
+            rexBuilder.makeInputRef(field.getType(), fieldIndex),
+            field.getName());
       }
 
       // Create a project rel on the output of the join.
       return relBuilder.push(joinRel)
-          .project(Pair.left(newProjects), Pair.right(newProjects), true)
+          .project(newProjects.leftList(), newProjects.rightList(), true)
           .build();
     }
 
@@ -2142,17 +2163,16 @@ public abstract class RelOptUtil {
     case INSERT:
     case DELETE:
     case UPDATE:
+    case MERGE:
       return typeFactory.createStructType(
-          ImmutableList.of(
-              Pair.of(AvaticaConnection.ROWCOUNT_COLUMN_NAME,
-                  typeFactory.createSqlType(SqlTypeName.BIGINT))));
+          PairList.of(AvaticaConnection.ROWCOUNT_COLUMN_NAME,
+              typeFactory.createSqlType(SqlTypeName.BIGINT)));
     case EXPLAIN:
       return typeFactory.createStructType(
-          ImmutableList.of(
-              Pair.of(AvaticaConnection.PLAN_COLUMN_NAME,
-                  typeFactory.createSqlType(
-                      SqlTypeName.VARCHAR,
-                      RelDataType.PRECISION_NOT_SPECIFIED))));
+          PairList.of(AvaticaConnection.PLAN_COLUMN_NAME,
+              typeFactory.createSqlType(
+                  SqlTypeName.VARCHAR,
+                  RelDataType.PRECISION_NOT_SPECIFIED)));
     default:
       throw Util.unexpected(kind);
     }
@@ -3302,6 +3322,28 @@ public abstract class RelOptUtil {
     return createProject(projectFactory, child, Mappings.asListNonNull(mapping.inverse()));
   }
 
+  /** Returns the relational table node for {@code tableName} if it occurs within a
+   * relational expression {@code root} otherwise an empty option is returned. */
+  public static @Nullable RelOptTable findTable(RelNode root, final String tableName) {
+    try {
+      RelShuttle visitor = new RelHomogeneousShuttle() {
+        @Override public RelNode visit(TableScan scan) {
+          final RelOptTable scanTable = scan.getTable();
+          final List<String> qualifiedName = scanTable.getQualifiedName();
+          if (qualifiedName.get(qualifiedName.size() - 1).equals(tableName)) {
+            throw new Util.FoundOne(scanTable);
+          }
+          return super.visit(scan);
+        }
+      };
+      root.accept(visitor);
+      return null;
+    } catch (Util.FoundOne e) {
+      Util.swallow(e, null);
+      return (RelOptTable) e.getNode();
+    }
+  }
+
   /** Returns whether relational expression {@code target} occurs within a
    * relational expression {@code ancestor}. */
   public static boolean contains(RelNode ancestor, final RelNode target) {
@@ -3746,27 +3788,21 @@ public abstract class RelOptUtil {
               extraLeftExprs, extraRightExprs, relBuilder.getRexBuilder());
     }
 
+    final PairList<RexNode, @Nullable String> pairs = PairList.of();
     relBuilder.push(originalJoin.getLeft());
     if (!extraLeftExprs.isEmpty()) {
       final List<RelDataTypeField> fields =
           relBuilder.peek().getRowType().getFieldList();
-      final List<Pair<RexNode, @Nullable String>> pairs =
-          new AbstractList<Pair<RexNode, @Nullable String>>() {
-            @Override public int size() {
-              return leftCount + extraLeftExprs.size();
-            }
-
-            @Override public Pair<RexNode, @Nullable String> get(int index) {
-              if (index < leftCount) {
-                RelDataTypeField field = fields.get(index);
-                return Pair.of(
-                    new RexInputRef(index, field.getType()), field.getName());
-              } else {
-                return Pair.of(extraLeftExprs.get(index - leftCount), null);
-              }
-            }
-          };
-      relBuilder.project(Pair.left(pairs), Pair.right(pairs));
+      for (int i = 0, n = leftCount + extraLeftExprs.size(); i < n; i++) {
+        if (i < leftCount) {
+          RelDataTypeField field = fields.get(i);
+          pairs.add(new RexInputRef(i, field.getType()), field.getName());
+        } else {
+          pairs.add(extraLeftExprs.get(i - leftCount), null);
+        }
+      }
+      relBuilder.project(pairs.leftList(), pairs.rightList());
+      pairs.clear();
     }
 
     relBuilder.push(originalJoin.getRight());
@@ -3774,28 +3810,18 @@ public abstract class RelOptUtil {
       final List<RelDataTypeField> fields =
           relBuilder.peek().getRowType().getFieldList();
       final int newLeftCount = leftCount + extraLeftExprs.size();
-      final List<Pair<RexNode, @Nullable String>> pairs =
-          new AbstractList<Pair<RexNode, @Nullable String>>() {
-            @Override public int size() {
-              return rightCount + extraRightExprs.size();
-            }
-
-            @Override public Pair<RexNode, @Nullable String> get(int index) {
-              if (index < rightCount) {
-                RelDataTypeField field = fields.get(index);
-                return Pair.of(
-                    new RexInputRef(index, field.getType()),
-                    field.getName());
-              } else {
-                return Pair.of(
-                    RexUtil.shift(
-                        extraRightExprs.get(index - rightCount),
-                        -newLeftCount),
-                    null);
-              }
-            }
-          };
-      relBuilder.project(Pair.left(pairs), Pair.right(pairs));
+      for (int i = 0, n = rightCount + extraRightExprs.size(); i < n; i++) {
+        if (i < rightCount) {
+          RelDataTypeField field = fields.get(i);
+          pairs.add(new RexInputRef(i, field.getType()), field.getName());
+        } else {
+          pairs.add(
+              RexUtil.shift(extraRightExprs.get(i - rightCount), -newLeftCount),
+              null);
+        }
+      }
+      relBuilder.project(pairs.leftList(), pairs.rightList());
+      pairs.clear();
     }
 
     final RelNode right = relBuilder.build();

@@ -777,6 +777,53 @@ having exists
 
 !ok
 
+# Having with correlation anded with normal condition.
+with src (key, "value")
+  as (select * from (values (1, 'a'), (2, 'z')) as t(key, "value"))
+select b.key, count(*) as c
+from src b
+group by b.key
+having exists
+  (select a.key
+  from src a
+  where a.key = b.key and a."value" > 'val_9') and b.key > 0;
++-----+---+
+| KEY | C |
++-----+---+
+|   2 | 1 |
++-----+---+
+(1 row)
+
+!ok
+
+# [CALCITE-6007] Sub-query that contains WITH and has no alias generates invalid SQL after expansion
+SELECT a, b
+FROM (
+  WITH sub AS (SELECT 1 AS a, 2 AS b)
+  SELECT * FROM sub)
+WHERE a IS NOT NULL;
++---+---+
+| A | B |
++---+---+
+| 1 | 2 |
++---+---+
+(1 row)
+
+!ok
+
+# Similar pattern to previous, without WITH
+SELECT a, b
+FROM (SELECT 1 AS a, 2 AS b)
+WHERE a IS NOT NULL;
++---+---+
+| A | B |
++---+---+
+| 1 | 2 |
++---+---+
+(1 row)
+
+!ok
+
 # [CALCITE-411] Duplicate aliases
 select 1 as a, 2 as a from (values (true));
 +---+---+
@@ -1398,6 +1445,18 @@ from "scott".emp;
 |     30 | {7900, 30} |
 +--------+------------+
 (14 rows)
+
+!ok
+
+# [CALCITE-5960] CAST failed if SqlTypeFamily of targetType is NULL
+# Cast row
+SELECT cast(row(1, 2) as row(a integer, b tinyint)) as r;
++--------+
+| R      |
++--------+
+| {1, 2} |
++--------+
+(1 row)
 
 !ok
 
@@ -2148,12 +2207,12 @@ select array[1,null,2] as a from (values (1));
 
 values array['a',null,'bcd'],
   array['efgh'];
-+----------------+
-| EXPR$0         |
-+----------------+
-| [a, null, bcd] |
-| [efgh]         |
-+----------------+
++------------------+
+| EXPR$0           |
++------------------+
+| [a  , null, bcd] |
+| [efgh]           |
++------------------+
 (2 rows)
 
 !ok
@@ -2379,6 +2438,202 @@ FROM (VALUES (INTERVAL '1' DAY)) AS t (i)
 GROUP BY TIMESTAMP '1969-07-20 00:00:00' + i;
 TS
 1969-07-21 00:00:00
+!ok
+
+!use scott
+!set outputformat mysql
+
+# [CALCITE-5769] Optimizing 'CAST(e AS t) IS NOT NULL' to 'e IS NOT NULL'
+
+# Test CAST(e as t) IS NOT NULL when CAST is lossless And e IS NOT NULL
+select cast(deptno as integer) IS NOT NULL from "scott".dept;
++--------+
+| EXPR$0 |
++--------+
+| true   |
+| true   |
+| true   |
+| true   |
++--------+
+(4 rows)
+
+!ok
+EnumerableCalc(expr#0..2=[{inputs}], expr#3=[true], EXPR$0=[$t3])
+  EnumerableTableScan(table=[[scott, DEPT]])
+!plan
+
+# Test CAST(e as t) IS NULL when CAST is lossless And e IS NOT NULL
+select cast(deptno as integer) IS NULL from "scott".dept;
++--------+
+| EXPR$0 |
++--------+
+| false  |
+| false  |
+| false  |
+| false  |
++--------+
+(4 rows)
+
+!ok
+EnumerableCalc(expr#0..2=[{inputs}], expr#3=[false], EXPR$0=[$t3])
+  EnumerableTableScan(table=[[scott, DEPT]])
+!plan
+
+# Test CAST(e as t) IS NOT NULL when CAST is lossless And e is nullable
+select cast(mgr as integer) IS NOT NULL from "scott".emp;
++--------+
+| EXPR$0 |
++--------+
+| false  |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
+| true   |
++--------+
+(14 rows)
+
+!ok
+EnumerableCalc(expr#0..7=[{inputs}], expr#8=[IS NOT NULL($t3)], EXPR$0=[$t8])
+  EnumerableTableScan(table=[[scott, EMP]])
+!plan
+
+# Test CAST(e as t) IS NULL when CAST is lossless And e is nullable
+select cast(mgr as integer) IS NULL from "scott".emp;
++--------+
+| EXPR$0 |
++--------+
+| false  |
+| true   |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
++--------+
+(14 rows)
+
+!ok
+EnumerableCalc(expr#0..7=[{inputs}], expr#8=[IS NULL($t3)], EXPR$0=[$t8])
+  EnumerableTableScan(table=[[scott, EMP]])
+!plan
+
+# Test CAST(e as t) IS NOT NULL when CAST is not lossless And e is nullable
+select cast(comm as integer) IS NOT NULL from "scott".emp;
++--------+
+| EXPR$0 |
++--------+
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| false  |
+| true   |
+| true   |
+| true   |
+| true   |
++--------+
+(14 rows)
+
+!ok
+EnumerableCalc(expr#0..7=[{inputs}], expr#8=[CAST($t6):INTEGER], expr#9=[IS NOT NULL($t8)], EXPR$0=[$t9])
+  EnumerableTableScan(table=[[scott, EMP]])
+!plan
+
+# [CALCITE-5870] Allow literals like DECIMAL '12.3' (consistent with Postgres)
+# Test a decimal value between decimal logic for range checking.
+select 12.3 between decimal '5.6' and decimal '17.8';
++--------+
+| EXPR$0 |
++--------+
+| true   |
++--------+
+(1 row)
+
+!ok
+
+# Test the decimal 'xx' + a decimal constant value case
+select decimal'12.3' + 5.6;
++--------+
+| EXPR$0 |
++--------+
+|   17.9 |
++--------+
+(1 row)
+
+!ok
+
+# [CALCITE-5570] Support nested map type for SqlDataTypeSpec
+SELECT
+  cast(x as map<int, int>),
+  cast(y as map<int, varchar array>),
+  cast(z as map<varchar  multiset, map<int, int>>)
+FROM (
+  SELECT
+    map[1, 2, 3, 4] as x,
+    map[1, array['a', 'b'], 2, array['c', 'd']] as y,
+    map[multiset['A'], map[1,2], multiset['B'], map[3, 4]] as z
+);
++------------+----------------------+------------------------+
+| EXPR$0     | EXPR$1               | EXPR$2                 |
++------------+----------------------+------------------------+
+| {1=2, 3=4} | {1=[a, b], 2=[c, d]} | {[A]={1=2}, [B]={3=4}} |
++------------+----------------------+------------------------+
+(1 row)
+
+!ok
+
+# [CALCITE-6040] The operand type inference of SqlMapValueConstructor is incorrect
+SELECT
+  map['foo', null],
+  map[null, 'foo'],
+  map[1, 'foo', 2, null],
+  map[1, null, 2, 'foo'];
++------------+------------+-----------------+-----------------+
+| EXPR$0     | EXPR$1     | EXPR$2          | EXPR$3          |
++------------+------------+-----------------+-----------------+
+| {foo=null} | {null=foo} | {1=foo, 2=null} | {1=null, 2=foo} |
++------------+------------+-----------------+-----------------+
+(1 row)
+
+!ok
+
+!use post
+
+# [CALCITE-5863] Incorrect validation with range and multiple order by columns
+SELECT sum("salary")
+OVER (ORDER BY "salary", "deptno" RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
+FROM "hr"."emps";
++---------+
+| EXPR$0  |
++---------+
+| 11500.0 |
+| 21500.0 |
+| 29500.0 |
+| 36500.0 |
++---------+
+(4 rows)
+
 !ok
 
 # End misc.iq

@@ -29,7 +29,6 @@ import org.apache.calcite.rex.RexTableInputRef.RelTableRef;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.util.ImmutableBitSet;
 
-import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -40,6 +39,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import static org.apache.calcite.linq4j.Nullness.castNonNull;
 
@@ -366,7 +366,7 @@ public class RelMetadataQuery extends RelMetadataQueryBase {
    * @param rel           the relational expression
    * @param column 0-based ordinal for output column of interest
    * @return set of origin columns, or null if this information cannot be
-   * determined (whereas empty set indicates Handler.classinitely no origin columns at
+   * determined (whereas empty set indicates definitely no origin columns at
    * all)
    */
   public @Nullable Set<RelColumnOrigin> getColumnOrigins(RelNode rel, int column) {
@@ -476,7 +476,7 @@ public class RelMetadataQuery extends RelMetadataQueryBase {
    *
    * @param rel the relational expression
    * @return set of keys, or null if this information cannot be determined
-   * (whereas empty set indicates Handler.classinitely no keys at all)
+   * (whereas empty set indicates definitely no keys at all)
    */
   public @Nullable Set<ImmutableBitSet> getUniqueKeys(RelNode rel) {
     return getUniqueKeys(rel, false);

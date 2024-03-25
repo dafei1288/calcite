@@ -68,38 +68,21 @@ import static org.apache.calcite.sql.test.ResultCheckers.isSingle;
 public interface SqlOperatorFixture extends AutoCloseable {
   //~ Enums ------------------------------------------------------------------
 
-  // TODO: Change message when Fnl3Fixed to something like
-  // "Invalid character for cast: PC=0 Code=22018"
-  String INVALID_CHAR_MESSAGE =
-      Bug.FNL3_FIXED ? null : "(?s).*";
+  // TODO: Change message
+  String INVALID_CHAR_MESSAGE = "(?s).*";
 
-  // TODO: Change message when Fnl3Fixed to something like
-  // "Overflow during calculation or cast: PC=0 Code=22003"
-  String OUT_OF_RANGE_MESSAGE =
-      Bug.FNL3_FIXED ? null : "(?s).*";
+  String OUT_OF_RANGE_MESSAGE = ".* out of range.*";
 
-  // TODO: Change message when Fnl3Fixed to something like
-  // "Division by zero: PC=0 Code=22012"
-  String DIVISION_BY_ZERO_MESSAGE =
-      Bug.FNL3_FIXED ? null : "(?s).*";
+  String WRONG_FORMAT_MESSAGE = "Number has wrong format.*";
 
-  // TODO: Change message when Fnl3Fixed to something like
-  // "String right truncation: PC=0 Code=22001"
-  String STRING_TRUNC_MESSAGE =
-      Bug.FNL3_FIXED ? null : "(?s).*";
+  // TODO: Change message
+  String DIVISION_BY_ZERO_MESSAGE = "(?s).*";
 
-  // TODO: Change message when Fnl3Fixed to something like
-  // "Invalid datetime format: PC=0 Code=22007"
-  String BAD_DATETIME_MESSAGE =
-      Bug.FNL3_FIXED ? null : "(?s).*";
+  // TODO: Change message
+  String STRING_TRUNC_MESSAGE = "(?s).*";
 
-  // Error messages when an invalid time unit is given as
-  // input to extract for a particular input type.
-  String INVALID_EXTRACT_UNIT_CONVERTLET_ERROR =
-      "Extract.*from.*type data is not supported";
-
-  String INVALID_EXTRACT_UNIT_VALIDATION_ERROR =
-      "Cannot apply 'EXTRACT' to arguments of type .*'\n.*";
+  // TODO: Change message
+  String BAD_DATETIME_MESSAGE = "(?s).*";
 
   String LITERAL_OUT_OF_RANGE_MESSAGE =
       "(?s).*Numeric literal.*out of range.*";
@@ -654,8 +637,12 @@ public interface SqlOperatorFixture extends AutoCloseable {
 
   default void checkCastFails(String value, String targetType,
       String expectedError, boolean runtime, CastType castType) {
-    final String castString = getCastString(value, targetType, !runtime, castType);
-    checkFails(castString, expectedError, runtime);
+    final String query = getCastString(value, targetType, !runtime, castType);
+    if (castType == CastType.CAST || !runtime) {
+      checkFails(query, expectedError, runtime);
+    } else {
+      checkNull(query);
+    }
   }
 
   default void checkCastToString(String value, @Nullable String type,

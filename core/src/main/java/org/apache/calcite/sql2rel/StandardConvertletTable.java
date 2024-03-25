@@ -82,7 +82,6 @@ import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 
 import org.checkerframework.checker.initialization.qual.UnknownInitialization;
@@ -120,6 +119,8 @@ public class StandardConvertletTable extends ReflectiveConvertletTable {
 
     // Register aliases (operators which have a different name but
     // identical behavior to other operators).
+    addAlias(SqlLibraryOperators.LEN,
+        SqlStdOperatorTable.CHAR_LENGTH);
     addAlias(SqlLibraryOperators.LENGTH,
         SqlStdOperatorTable.CHAR_LENGTH);
     addAlias(SqlStdOperatorTable.CHARACTER_LENGTH,
@@ -132,6 +133,11 @@ public class StandardConvertletTable extends ReflectiveConvertletTable {
         SqlStdOperatorTable.IS_NOT_DISTINCT_FROM);
     addAlias(SqlStdOperatorTable.PERCENT_REMAINDER, SqlStdOperatorTable.MOD);
     addAlias(SqlLibraryOperators.IFNULL, SqlLibraryOperators.NVL);
+    addAlias(SqlLibraryOperators.REGEXP_SUBSTR, SqlLibraryOperators.REGEXP_EXTRACT);
+    addAlias(SqlLibraryOperators.ENDSWITH, SqlLibraryOperators.ENDS_WITH);
+    addAlias(SqlLibraryOperators.STARTSWITH, SqlLibraryOperators.STARTS_WITH);
+    addAlias(SqlLibraryOperators.BITAND_AGG, SqlStdOperatorTable.BIT_AND);
+    addAlias(SqlLibraryOperators.BITOR_AGG, SqlStdOperatorTable.BIT_OR);
 
     // Register convertlets for specific objects.
     registerOp(SqlStdOperatorTable.CAST, this::convertCast);
@@ -1833,7 +1839,7 @@ public class StandardConvertletTable extends ReflectiveConvertletTable {
 
     SubstrConvertlet(SqlLibrary library) {
       this.library = library;
-      Preconditions.checkArgument(library == SqlLibrary.ORACLE
+      checkArgument(library == SqlLibrary.ORACLE
           || library == SqlLibrary.MYSQL
           || library == SqlLibrary.BIG_QUERY
           || library == SqlLibrary.POSTGRESQL);
@@ -2084,7 +2090,8 @@ public class StandardConvertletTable extends ReflectiveConvertletTable {
       final TimeUnit unit = first(timeFrame.unit(), TimeUnit.EPOCH);
       final RexNode interval2Sub;
       switch (unit) {
-      //Fractional second units are converted to seconds using their associated multiplier.
+      // Fractional second units are converted to seconds using their
+      // associated multiplier.
       case MICROSECOND:
       case NANOSECOND:
         interval2Sub =

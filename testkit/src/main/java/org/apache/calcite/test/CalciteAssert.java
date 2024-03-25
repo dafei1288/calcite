@@ -681,6 +681,17 @@ public class CalciteAssert {
       boolean materializationsEnabled,
       final Consumer<RelNode> convertChecker,
       final Consumer<RelNode> substitutionChecker) {
+    assertPrepare(connection, sql, materializationsEnabled, ImmutableList.of(),
+        convertChecker, substitutionChecker);
+  }
+
+  static void assertPrepare(
+      Connection connection,
+      String sql,
+      boolean materializationsEnabled,
+      List<Pair<Hook, Consumer>> hooks,
+      final Consumer<RelNode> convertChecker,
+      final Consumer<RelNode> substitutionChecker) {
     try (Closer closer = new Closer()) {
       if (convertChecker != null) {
         closer.add(
@@ -689,6 +700,9 @@ public class CalciteAssert {
       if (substitutionChecker != null) {
         closer.add(
             Hook.SUB.addThread(substitutionChecker));
+      }
+      for (Pair<Hook, Consumer> hook : hooks) {
+        closer.add(hook.left.addThread(hook.right));
       }
       ((CalciteConnection) connection).getProperties().setProperty(
           CalciteConnectionProperty.MATERIALIZATIONS_ENABLED.camelName(),
@@ -885,7 +899,7 @@ public class CalciteAssert {
       return s;
     case HR:
       return rootSchema.add(schema.schemaName,
-          new ReflectiveSchema(new HrSchema()));
+          new ReflectiveSchemaWithoutRowCount(new HrSchema()));
     case LINGUAL:
       return rootSchema.add(schema.schemaName,
           new ReflectiveSchema(new LingualSchema()));
@@ -1016,6 +1030,9 @@ public class CalciteAssert {
       TableFunction tableFunction =
           TableFunctionImpl.create(Smalls.SimpleTableFunction.class, "eval");
       aux.add("TBLFUN", tableFunction);
+      TableFunction tableFunctionIdentity =
+          TableFunctionImpl.create(Smalls.IdentityTableFunction.class, "eval");
+      aux.add("TBLFUN_IDENTITY", tableFunctionIdentity);
       final String simpleSql = "select *\n"
           + "from (values\n"
           + "    ('ABC', 1),\n"
@@ -1556,14 +1573,14 @@ public class CalciteAssert {
 
     public AssertQuery convertMatches(final Consumer<RelNode> checker) {
       return withConnection(connection ->
-        assertPrepare(connection, sql, this.materializationsEnabled,
+        assertPrepare(connection, sql, this.materializationsEnabled, hooks,
             checker, null));
     }
 
     public AssertQuery substitutionMatches(
         final Consumer<RelNode> checker) {
       return withConnection(connection ->
-        assertPrepare(connection, sql, materializationsEnabled, null, checker));
+        assertPrepare(connection, sql, materializationsEnabled, hooks, null, checker));
     }
 
     public AssertQuery explainContains(String expected) {
@@ -1742,7 +1759,19 @@ public class CalciteAssert {
     @Deprecated // to be removed before 2.0
     public final AssertQuery queryContains(
         com.google.common.base.Function<List, Void> predicate1) {
-      return queryContains((Consumer<List>) predicate1::apply);
+      return queryContains(functionConsumer(predicate1));
+    }
+
+    /** Converts a Guava function into a JDK consumer. */
+    @SuppressWarnings("Guava")
+    private static <T, R> Consumer<T> functionConsumer(
+        com.google.common.base.Function<T, R> handler) {
+      return t -> {
+        // Squash ErrorProne warnings that the return of the function is not
+        // used.
+        R r = handler.apply(t);
+        Util.discard(r);
+      };
     }
 
     /** Sets a limit on the number of rows returned. -1 means no limit. */

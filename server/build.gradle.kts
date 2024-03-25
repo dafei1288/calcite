@@ -33,13 +33,13 @@ dependencies {
     testImplementation(project(":testkit"))
     testImplementation("net.hydromatic:quidem")
     testImplementation("net.hydromatic:scott-data-hsqldb")
-    testImplementation("org.hsqldb:hsqldb")
+    testImplementation("org.hsqldb:hsqldb::jdk8")
     testImplementation("org.incava:java-diff")
     testRuntimeOnly("org.apache.logging.log4j:log4j-slf4j-impl")
 }
 
 val fmppMain by tasks.registering(org.apache.calcite.buildtools.fmpp.FmppTask::class) {
-    inputs.dir("src/main/codegen")
+    inputs.dir("src/main/codegen").withPathSensitivity(PathSensitivity.RELATIVE)
     config.set(file("src/main/codegen/config.fmpp"))
     templates.set(file("$rootDir/core/src/main/codegen/templates"))
 }
