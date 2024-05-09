@@ -211,19 +211,19 @@ public class SqlOperatorTest {
   public static final boolean TODO = false;
 
   /**
-   * Regular expression for a SQL TIME(0) value.
+   * Regular expression for a SQL TIME(0/1) value.
    */
   public static final Pattern TIME_PATTERN =
       Pattern.compile(
-          "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]");
+          "[0-9][0-9]:[0-9][0-9]:[0-9][0-9](.[0-9])?");
 
   /**
-   * Regular expression for a SQL TIMESTAMP(0) value.
+   * Regular expression for a SQL TIMESTAMP(0/1) value.
    */
   public static final Pattern TIMESTAMP_PATTERN =
       Pattern.compile(
           "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] "
-              + "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]");
+              + "[0-9][0-9]:[0-9][0-9]:[0-9][0-9](.[0-9])?");
 
   /**
    * Regular expression for a SQL DATE value.
@@ -523,7 +523,7 @@ public class SqlOperatorTest {
     }
     f.checkString("cast(1.3243232e0 as varchar(4))", "1.32",
         "VARCHAR(4) NOT NULL");
-    f.checkString("cast(1.9e5 as char(4))", "1.9E", "CHAR(4) NOT NULL");
+    f.checkString("cast(1.9e5 as char(4))", "1900", "CHAR(4) NOT NULL");
 
     // string
     f.checkCastToString("'abc'", "CHAR(1)", "a", castType);
@@ -665,6 +665,14 @@ public class SqlOperatorTest {
     });
   }
 
+  /** Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6395">
+   * [CALCITE-6395] Significant precision loss when representing REAL literals</a>. */
+  @Test public void floatPrecisionTest() {
+    SqlOperatorFixture f = fixture();
+    f.checkScalar("CAST(CAST('36854775807.0' AS REAL) AS BIGINT)",
+        "36854775808", "BIGINT NOT NULL");
+  }
+
   @ParameterizedTest
   @MethodSource("safeParameters")
   void testCastToExactNumeric(CastType castType, SqlOperatorFixture f) {
@@ -705,6 +713,25 @@ public class SqlOperatorTest {
         "SMALLINT NOT NULL", "32767");
     f.checkScalarExact("CAST(CAST('32767.4' AS FLOAT) AS CHAR)",
         "CHAR(1) NOT NULL", "3");
+  }
+
+  /**
+   * Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6210">
+   * Cast to VARBINARY causes an assertion failure</a>. */
+  @Test public void testVarbinaryCast() {
+    SqlOperatorFixture f = fixture();
+    f.checkScalar("CAST('00' AS VARBINARY)", "3030", "VARBINARY NOT NULL");
+    f.checkScalar("CAST('help' AS VARBINARY)", "68656c70", "VARBINARY NOT NULL");
+    f.checkScalar("CAST('help' AS VARBINARY(2))", "6865", "VARBINARY(2) NOT NULL");
+    f.checkScalar("CAST('00' AS BINARY(1))", "30", "BINARY(1) NOT NULL");
+    f.checkScalar("CAST('10' AS BINARY(2))", "3130", "BINARY(2) NOT NULL");
+    f.checkScalar("CAST('10' AS BINARY(1))", "31", "BINARY(1) NOT NULL");
+    f.checkScalar("CAST('10' AS BINARY(3))", "313000", "BINARY(3) NOT NULL");
+    f.checkScalar("CAST(_UTF8'Hello ਸੰਸਾਰ!' AS VARBINARY)",
+        "48656c6c6f20e0a8b8e0a9b0e0a8b8e0a8bee0a8b021", "VARBINARY NOT NULL");
+    f.checkFails("CAST('Hello ਸੰਸਾਰ!' AS VARBINARY)",
+        ".*Failed to encode .* in character set 'ISO-8859-1'", true);
+    f.checkNull("CAST(CAST(NULL AS VARCHAR) AS VARBINARY)");
   }
 
   @ParameterizedTest
@@ -1167,11 +1194,9 @@ public class SqlOperatorTest {
           "12:42:26", "TIME(0) NOT NULL");
     }
 
-    if (Bug.FRG282_FIXED) {
-      // test precision
-      f.checkScalar("cast(TIME '12:42:25.34' as TIME(2))",
-          "12:42:25.34", "TIME(2) NOT NULL");
-    }
+    // test precision
+    f.checkScalar("cast(TIME '12:42:25.34' as TIME(2))",
+        "12:42:25.34", "TIME(2) NOT NULL");
 
     f.checkScalar("cast(DATE '1945-02-24' as DATE)",
         "1945-02-24", "DATE NOT NULL");
@@ -1230,10 +1255,8 @@ public class SqlOperatorTest {
     f.checkScalar("cast('12:42:25.34' as TIME)",
         "12:42:25", "TIME(0) NOT NULL");
 
-    if (Bug.FRG282_FIXED) {
-      f.checkScalar("cast('12:42:25.34' as TIME(2))",
-          "12:42:25.34", "TIME(2) NOT NULL");
-    }
+    f.checkScalar("cast('12:42:25.34' as TIME(2))",
+        "12:42:25.34", "TIME(2) NOT NULL");
 
     if (castType == CastType.CAST) {
       f.checkFails("cast('nottime' as TIME)", BAD_DATETIME_MESSAGE, true);
@@ -1270,42 +1293,26 @@ public class SqlOperatorTest {
     f.checkScalar("cast('2004-02-29' as TIMESTAMP)",
         "2004-02-29 00:00:00", "TIMESTAMP(0) NOT NULL");
 
-    if (Bug.FRG282_FIXED) {
-      f.checkScalar("cast('1945-02-24 12:42:25.34' as TIMESTAMP(2))",
-          "1945-02-24 12:42:25.34", "TIMESTAMP(2) NOT NULL");
-    }
-    // Remove the if condition and the else block once CALCITE-6053 is fixed
-    if (TestUtil.AVATICA_VERSION.startsWith("1.0.0-dev-main")) {
-      if (castType == CastType.CAST) {
-        f.checkFails("cast('1945-2-2 12:2:5' as TIMESTAMP)",
-            "Invalid DATE value, '1945-2-2 12:2:5'", true);
-        f.checkFails("cast('1241241' as TIMESTAMP)",
-            "Invalid DATE value, '1241241'", true);
-        f.checkFails("cast('1945-20-24 12:42:25.34' as TIMESTAMP)",
-            "Invalid DATE value, '1945-20-24 12:42:25.34'", true);
-        f.checkFails("cast('1945-01-24 25:42:25.34' as TIMESTAMP)",
-            "Value of HOUR field is out of range in '1945-01-24 25:42:25.34'", true);
-        f.checkFails("cast('1945-1-24 12:23:34.454' as TIMESTAMP)",
-            "Invalid DATE value, '1945-1-24 12:23:34.454'", true);
-      } else {
-        // test cases for 'SAFE_CAST' and 'TRY_CAST'
-        f.checkNull("cast('1945-2-2 12:2:5' as TIMESTAMP)");
-        f.checkNull("cast('1241241' as TIMESTAMP)");
-        f.checkNull("cast('1945-20-24 12:42:25.34' as TIMESTAMP)");
-        f.checkNull("cast('1945-01-24 25:42:25.34' as TIMESTAMP)");
-        f.checkNull("cast('1945-1-24 12:23:34.454' as TIMESTAMP)");
-      }
+    f.checkScalar("cast('1945-02-24 12:42:25.34' as TIMESTAMP(2))",
+        "1945-02-24 12:42:25.34", "TIMESTAMP(2) NOT NULL");
+    if (castType == CastType.CAST) {
+      f.checkFails("cast('1945-2-2 12:2:5' as TIMESTAMP)",
+          "Invalid DATE value, '1945-2-2 12:2:5'", true);
+      f.checkFails("cast('1241241' as TIMESTAMP)",
+          "Invalid DATE value, '1241241'", true);
+      f.checkFails("cast('1945-20-24 12:42:25.34' as TIMESTAMP)",
+          "Invalid DATE value, '1945-20-24 12:42:25.34'", true);
+      f.checkFails("cast('1945-01-24 25:42:25.34' as TIMESTAMP)",
+          "Value of HOUR field is out of range in '1945-01-24 25:42:25.34'", true);
+      f.checkFails("cast('1945-1-24 12:23:34.454' as TIMESTAMP)",
+          "Invalid DATE value, '1945-1-24 12:23:34.454'", true);
     } else {
-      f.checkScalar("cast('1945-2-2 12:2:5' as TIMESTAMP)",
-          "1945-02-02 12:02:05", "TIMESTAMP(0) NOT NULL");
-      f.checkScalar("cast('1241241' as TIMESTAMP)",
-          "1241-01-01 00:00:00", "TIMESTAMP(0) NOT NULL");
-      f.checkScalar("cast('1945-20-24 12:42:25.34' as TIMESTAMP)",
-          "1946-08-26 12:42:25", "TIMESTAMP(0) NOT NULL");
-      f.checkScalar("cast('1945-01-24 25:42:25.34' as TIMESTAMP)",
-          "1945-01-25 01:42:25", "TIMESTAMP(0) NOT NULL");
-      f.checkScalar("cast('1945-1-24 12:23:34.454' as TIMESTAMP)",
-          "1945-01-24 12:23:34", "TIMESTAMP(0) NOT NULL");
+      // test cases for 'SAFE_CAST' and 'TRY_CAST'
+      f.checkNull("cast('1945-2-2 12:2:5' as TIMESTAMP)");
+      f.checkNull("cast('1241241' as TIMESTAMP)");
+      f.checkNull("cast('1945-20-24 12:42:25.34' as TIMESTAMP)");
+      f.checkNull("cast('1945-01-24 25:42:25.34' as TIMESTAMP)");
+      f.checkNull("cast('1945-1-24 12:23:34.454' as TIMESTAMP)");
     }
     if (castType == CastType.CAST) {
       f.checkFails("cast('nottime' as TIMESTAMP)", BAD_DATETIME_MESSAGE, true);
@@ -1318,7 +1325,7 @@ public class SqlOperatorTest {
     f.checkCastToString("DATE '1945-2-24'", null, "1945-02-24", castType);
 
     f.checkScalar("cast('1945-02-24' as DATE)", "1945-02-24", "DATE NOT NULL");
-    f.checkScalar("cast(' 1945-02-04 ' as DATE)", "1945-02-04", "DATE NOT NULL");
+    f.checkScalar("cast(' 1945-2-4 ' as DATE)", "1945-02-04", "DATE NOT NULL");
     f.checkScalar("cast('  1945-02-24  ' as DATE)",
         "1945-02-24", "DATE NOT NULL");
     if (castType == CastType.CAST) {
@@ -1327,8 +1334,13 @@ public class SqlOperatorTest {
       f.checkNull("cast('notdate' as DATE)");
     }
 
-    f.checkScalar("cast('52534253' as DATE)", "7368-10-13", "DATE NOT NULL");
-    f.checkScalar("cast('1945-30-24' as DATE)", "1947-06-26", "DATE NOT NULL");
+    if (castType == CastType.CAST) {
+      f.checkFails("cast('52534253' as DATE)", BAD_DATETIME_MESSAGE, true);
+      f.checkFails("cast('1945-30-24' as DATE)", BAD_DATETIME_MESSAGE, true);
+    } else {
+      f.checkNull("cast('52534253' as DATE)");
+      f.checkNull("cast('1945-30-24' as DATE)");
+    }
 
     // cast null
     f.checkNull("cast(null as date)");
@@ -1341,6 +1353,207 @@ public class SqlOperatorTest {
     f.checkNull("cast(cast(null as time) as timestamp)");
     f.checkNull("cast(cast(null as timestamp) as date)");
     f.checkNull("cast(cast(null as timestamp) as time)");
+  }
+
+  @ParameterizedTest
+  @MethodSource("safeParameters")
+  void testCastFormatClauseDateTimeToString(CastType castType, SqlOperatorFixture f) {
+
+    // Cast DATE to String
+    f.checkString("cast(date '2018-01-30' as varchar format 'YYYY')",
+        "2018",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '50-01-30' as varchar format 'YYYY')",
+        "0050",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'YYY')",
+        "018",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'YYY')",
+        "018",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '50-01-30' as varchar format 'YYY')",
+        "050",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'Y')",
+        "8",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-11-30' as varchar format 'Month')",
+        "November",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'MONTH')",
+        "JANUARY",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-9-30' as varchar format 'mon')",
+        "sep",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-12-30' as varchar format 'Mon')",
+        "Dec",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'MON')",
+        "JAN",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'MM')",
+        "01",
+        "VARCHAR NOT NULL");
+
+    f.checkString("cast(date '2018-01-30' as varchar format 'DAY')",
+        "TUESDAY",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'Day')",
+        "Tuesday",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'day')",
+        "tuesday",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-01' as varchar format 'DY')",
+        "MON",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-01' as varchar format 'Dy')",
+        "Mon",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-01' as varchar format 'dy')",
+        "mon",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'D')",
+        "3",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-01-30' as varchar format 'DD')",
+        "30",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2018-06-30' as varchar format 'DDD')",
+        "181",
+        "VARCHAR NOT NULL");
+
+    f.checkString("cast(date '2018-01-30' as varchar format 'MM-DD-YY')",
+        "01-30-18",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(date '2021-12-21' as varchar format 'YY Q MON DD')",
+        "21 4 DEC 21",
+        "VARCHAR NOT NULL");
+
+    // Cast TIME to String
+    f.checkString("cast(time '21:30:00' as varchar format 'HH12')",
+        "09",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '1:30:00' as varchar format 'HH24')",
+        "01",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '11:24:00' as varchar format 'MI')",
+        "24",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '21:30:25.16' as varchar format 'SS')",
+        "25",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '15:45:10' as varchar format 'HH12:MI')",
+        "03:45",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '21:30:25.16' as varchar format 'SSSSS')",
+        "77425",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '00:00:00.23' as varchar format 'SSSSS')",
+        "00000",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '01:59:59.99' as varchar format 'SSSSS')",
+        "07199",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '23:30:55.43' as varchar format 'AM')",
+        "PM",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '12:30:55' as varchar format 'PM')",
+        "PM",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '08:45:12' as varchar format 'P.M.')",
+        "A.M.",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '16:17:12' as varchar format 'am')",
+        "pm",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '02:23:23' as varchar format 'p.m.')",
+        "a.m.",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '23:30:55.4757' as varchar format 'FF2')",
+        "47",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '23:30:55.1233793' as varchar format 'FF5')",
+        "12300",
+        "VARCHAR NOT NULL");
+    f.checkString("cast(time '23:30:55.435712' as varchar format 'FF9')",
+          "435000000",
+          "VARCHAR NOT NULL");
+
+
+    // Cast TIMESTAMP to String
+    if (Bug.CALCITE_6367_FIXED) {
+      // Query output cannot be validated as it's dependent on execution time zone
+      f.checkQuery("cast(timestamp '2008-12-25 00:00:00+06:00' as varchar format 'TZH')");
+      f.checkString("cast(timestamp '2008-12-25 00:00:00+00:00' as varchar format "
+              + "'TZM' AT TIME ZONE 'Asia/Kolkata')",
+          "30",
+          "VARCHAR NOT NULL");
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource("safeParameters")
+  void testCastFormatClauseStringToDateTime(CastType castType, SqlOperatorFixture f) {
+    f.checkScalar("cast('18-12-03' as date format 'YY-MM-DD')",
+        "2018-12-03",
+        "DATE NOT NULL");
+    f.checkScalar("cast('JUN 30, 2018' as date format 'MON DD, YYYY')",
+        "2018-06-30",
+        "DATE NOT NULL");
+    f.checkScalar("cast('17:30' as time format 'HH12:MI')",
+        "17:30:00",
+        "TIME(0) NOT NULL");
+    f.checkScalar("cast('01:05:07.16' as time format 'HH24:MI:SS.FF4')",
+        "01:05:07",
+        "TIME(0) NOT NULL");
+    f.checkScalar("cast('2017-05-12' as timestamp format 'YYYY-MM-DD')",
+        "2017-05-12 00:00:00",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkScalar("cast('2020.06.03 12:42:53' as timestamp format 'YYYY.MM.DD HH:MI:SS')",
+        "2020-06-03 12:42:53",
+        "TIMESTAMP(0) NOT NULL");
+
+    if (Bug.CALCITE_6367_FIXED) {
+      f.checkScalar("cast('2020.06.03 00:00:53+06:30' as timestamp format"
+              + " 'YYYY.MM.DD HH24:MI:SSTZH:TZM')",
+          "2020-06-02 17:30:53 UTC",
+          "TIMESTAMP(0) NOT NULL");
+      f.checkScalar("cast('03:30 P.M.' as time format 'HH:MI P.M.')",
+          "15:30:00",
+          "TIME(0) NOT NULL");
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource("safeParameters")
+  void testCastFormatClauseByteToString(CastType castType, SqlOperatorFixture f) {
+    if (Bug.CALCITE_6270_FIXED) {
+      f.checkString("cast(b'\\x48\\x65\\x6c\\x6c\\x6f' as varchar format 'ASCII')",
+          "Hello",
+          "VARCHAR");
+      f.checkScalar("cast('Hello' as varbinary format 'ASCII')",
+          "\\x48\\x65\\x6c\\x6c\\x6f",
+          "VARBINARY NOT NULL");
+    }
+  }
+
+  @ParameterizedTest
+  @MethodSource("safeParameters")
+  void testCastFormatClauseNumericToString(CastType castType, SqlOperatorFixture f) {
+    if (Bug.CALCITE_6270_FIXED) {
+      f.checkString("cast(-12.23 as varchar FORMAT '999.999')",
+          "-12.230",
+          "VARCHAR NOT NULL");
+      f.checkString("cast(1234.56 as varchar FORMAT '$999,999.999')",
+          "$1,234.560",
+          "VARCHAR NOT NULL");
+      f.checkString("cast(123456 as varchar FORMAT '9.999EEEE')",
+          "1.235E+05",
+          "VARCHAR NOT NULL");
+    }
   }
 
   @Test void testMssqlConvert() {
@@ -3244,6 +3457,8 @@ public class SqlOperatorTest {
     // make sure that TIME values say in range
     f.checkScalar("time '12:03:01' + interval '1' day",
         "12:03:01", "TIME(0) NOT NULL");
+    f.checkScalar("time '12:03:01' + interval '25' day",
+        "12:03:01", "TIME(0) NOT NULL");
     f.checkScalar("time '12:03:01' + interval '25' hour",
         "13:03:01", "TIME(0) NOT NULL");
     f.checkScalar("time '12:03:01' + interval '25:0:1' hour to second",
@@ -3568,15 +3783,21 @@ public class SqlOperatorTest {
   }
 
   @Test void testRlikeOperator() {
-    final SqlOperatorFixture f = fixture().setFor(SqlLibraryOperators.RLIKE, VM_EXPAND);
+    final SqlOperatorFixture f = fixture()
+        .setFor(SqlLibraryOperators.RLIKE, VM_EXPAND);
     checkRlikeFunc(f, SqlLibrary.HIVE, SqlLibraryOperators.RLIKE);
     checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.RLIKE);
     checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.REGEXP);
-    checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.REGEXP_LIKE);
     checkNotRlikeFunc(f.withLibrary(SqlLibrary.HIVE));
     checkNotRlikeFunc(f.withLibrary(SqlLibrary.SPARK));
     checkRlikeFails(f.withLibrary(SqlLibrary.MYSQL));
     checkRlikeFails(f.withLibrary(SqlLibrary.ORACLE));
+
+    f.setFor(SqlLibraryOperators.REGEXP_LIKE, VM_EXPAND);
+    checkRlikeFunc(f, SqlLibrary.SPARK, SqlLibraryOperators.REGEXP_LIKE);
+    checkRlikeFunc(f, SqlLibrary.POSTGRESQL, SqlLibraryOperators.REGEXP_LIKE);
+    checkRlikeFunc(f, SqlLibrary.MYSQL, SqlLibraryOperators.REGEXP_LIKE);
+    checkRlikeFunc(f, SqlLibrary.ORACLE, SqlLibraryOperators.REGEXP_LIKE);
   }
 
   void checkRlikeFunc(SqlOperatorFixture f0, SqlLibrary library, SqlOperator operator) {
@@ -3669,9 +3890,8 @@ public class SqlOperatorTest {
   }
 
   @Test void testIlikeEscape() {
-    final SqlOperatorFixture f =
-        fixture().setFor(SqlLibraryOperators.ILIKE, VmName.EXPAND)
-            .withLibrary(SqlLibrary.POSTGRESQL);
+    final SqlOperatorFixture f = fixture().setFor(SqlLibraryOperators.ILIKE, VmName.EXPAND)
+        .withLibrary(SqlLibrary.POSTGRESQL);
     f.checkBoolean("'a_c' ilike 'a#_C' escape '#'", true);
     f.checkBoolean("'axc' ilike 'a#_C' escape '#'", false);
     f.checkBoolean("'a_c' ilike 'a\\_C' escape '\\'", true);
@@ -3755,6 +3975,34 @@ public class SqlOperatorTest {
     f1.checkBoolean("'ab\ncd\nef' ilike '%cd%'", true);
     f1.checkBoolean("'ab\ncd\nef' ilike '%CD%'", true);
     f1.checkBoolean("'ab\ncd\nef' ilike '%cde%'", false);
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6309">[CALCITE-6309]
+   * Add REGEXP_LIKE function (enabled in MySQL, Oracle, PostgreSQL and Spark libraries)</a>. */
+  @Test void testRegexpLike3() {
+    final SqlOperatorFixture f = fixture();
+    f.setFor(SqlLibraryOperators.REGEXP_LIKE, VmName.EXPAND);
+
+    final Consumer<SqlOperatorFixture> consumer = f1 -> {
+      f1.checkBoolean("REGEXP_LIKE('teststr', 'TEST', 'i')", true);
+      f1.checkBoolean("REGEXP_LIKE('ateststr', 'TEST', 'c')", false);
+      f1.checkBoolean("REGEXP_LIKE('atest\nstr', 'test.str', '')", false);
+      f1.checkBoolean("REGEXP_LIKE('atest\nstr', 'test.str', 'n')", true);
+      f1.checkBoolean("REGEXP_LIKE('atest\nstr', 'TEST.str', 'in')", true);
+      f1.checkBoolean("REGEXP_LIKE('ateststring', 'teststr', '')", true);
+      f1.checkBoolean("REGEXP_LIKE('ateststring', 'TESTstr', 'ic')", false);
+      f1.checkBoolean("REGEXP_LIKE('ateststring', 'TESTstr', 'ci')", true);
+      f1.checkBoolean("REGEXP_LIKE('atest\nstr', 'test.str', 's')", false);
+      f1.checkBoolean("REGEXP_LIKE('atest\nstr', 'test.str', 'ns')", false);
+      f1.checkBoolean("REGEXP_LIKE('atest\nstr', 'test.str', 'sn')", true);
+      f1.checkNull("REGEXP_LIKE(NULL, 'test.str', 'sn')");
+      f1.checkNull("REGEXP_LIKE('atest\nstr', NULL, 'sn')");
+      f1.checkNull("REGEXP_LIKE('atest\nstr', 'test.str', NULL)");
+    };
+    f.forEachLibrary(
+        list(SqlLibrary.MYSQL, SqlLibrary.SPARK,
+        SqlLibrary.POSTGRESQL, SqlLibrary.ORACLE), consumer);
   }
 
   /** Test case for
@@ -4479,10 +4727,10 @@ public class SqlOperatorTest {
         "Monday",
         "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 12:15:48.678', 'DY')",
-        "Fri",
+        "FRI",
         "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '0001-01-01 00:00:00.000', 'DY')",
-        "Mon",
+        "MON",
         "VARCHAR NOT NULL");
     f.checkString("to_char(timestamp '2022-06-03 12:15:48.678', 'CC')",
         "21",
@@ -4505,9 +4753,111 @@ public class SqlOperatorTest {
     f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'IW')",
         "23",
         "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'YYYY')",
+        "2022",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'YY')",
+        "22",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'Month')",
+        "June",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'Mon')",
+        "Jun",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'MM')",
+        "06",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'CC')",
+        "21",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'DDD')",
+        "154",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'DD')",
+        "03",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'D')",
+        "6",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'W')",
+        "1",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'WW')",
+        "23",
+        "VARCHAR NOT NULL");
+    f.checkString("to_char(timestamp '2022-06-03 13:15:48.678', 'gggggg')",
+        "gggggg",
+        "VARCHAR NOT NULL");
     f.checkNull("to_char(timestamp '2022-06-03 12:15:48.678', NULL)");
     f.checkNull("to_char(cast(NULL as timestamp), NULL)");
     f.checkNull("to_char(cast(NULL as timestamp), 'Day')");
+  }
+
+  @Test void testToDate() {
+    final SqlOperatorFixture f = fixture().withLibrary(SqlLibrary.POSTGRESQL);
+    f.setFor(SqlLibraryOperators.TO_DATE);
+
+    f.checkString("to_date('2022-06-03', 'YYYY-MM-DD')",
+        "2022-06-03",
+        "DATE NOT NULL");
+    f.checkString("to_date('0001-01-01', 'YYYY-MM-DD')",
+        "0001-01-01",
+        "DATE NOT NULL");
+    f.checkString("to_date('Jun 03, 2022', 'Mon DD, YYYY')",
+        "2022-06-03",
+        "DATE NOT NULL");
+    f.checkString("to_date('2022-June-03', 'YYYY-Month-DD')",
+        "2022-06-03",
+        "DATE NOT NULL");
+    f.checkString("to_date('2022-Jun-03', 'YYYY-Mon-DD')",
+        "2022-06-03",
+        "DATE NOT NULL");
+    f.checkString("to_date('2022-154', 'YYYY-DDD')",
+        "2022-06-03",
+        "DATE NOT NULL");
+    f.checkFails("to_date('ABCD', 'YYYY-MM-DD')",
+        "java.sql.SQLException: Invalid format: 'YYYY-MM-DD' for datetime string: 'ABCD'.",
+        true);
+    f.checkFails("to_date('2022-06-03', 'Invalid')",
+        "Illegal pattern character 'I'",
+        true);
+    f.checkNull("to_date(NULL, 'YYYY-MM-DD')");
+    f.checkNull("to_date('2022-06-03', NULL)");
+    f.checkNull("to_date(NULL, NULL)");
+  }
+
+  @Test void testToTimestamp() {
+    final SqlOperatorFixture f = fixture().withLibrary(SqlLibrary.POSTGRESQL);
+    f.setFor(SqlLibraryOperators.TO_TIMESTAMP);
+
+    f.checkString("to_timestamp('2022-06-03 18:34:56', 'YYYY-MM-DD HH24:MI:SS')",
+        "2022-06-03 18:34:56",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkString("to_timestamp('0001-01-01 18:43:56', 'YYYY-MM-DD HH24:MI:SS')",
+        "0001-01-01 18:43:56",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkString("to_timestamp('18:34:56 Jun 03, 2022', 'HH24:MI:SS Mon DD, YYYY')",
+        "2022-06-03 18:34:56",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkString("to_timestamp('18:34:56 2022-June-03', 'HH24:MI:SS YYYY-Month-DD')",
+        "2022-06-03 18:34:56",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkString("to_timestamp('18:34:56 2022-Jun-03', 'HH24:MI:SS YYYY-Mon-DD')",
+        "2022-06-03 18:34:56",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkString("to_timestamp('18:34:56 2022-154', 'HH24:MI:SS YYYY-DDD')",
+        "2022-06-03 18:34:56",
+        "TIMESTAMP(0) NOT NULL");
+    f.checkFails("to_timestamp('ABCD', 'YYYY-MM-DD HH24:MI:SS')",
+        "java.sql.SQLException: Invalid format: 'YYYY-MM-DD HH24:MI:SS' for datetime string: 'ABCD'.",
+        true);
+    f.checkFails("to_timestamp('2022-06-03 18:34:56', 'Invalid')",
+        "Illegal pattern character 'I'",
+        true);
+    f.checkNull("to_timestamp(NULL, 'YYYY-MM-DD HH24:MI:SS')");
+    f.checkNull("to_timestamp('2022-06-03 18:34:56', NULL)");
+    f.checkNull("to_timestamp(NULL, NULL)");
   }
 
   @Test void testFromBase64() {
@@ -6791,6 +7141,8 @@ public class SqlOperatorTest {
         "No match found for function signature ARRAY_REPEAT\\(<NUMERIC>, <NUMERIC>\\)", false);
 
     final SqlOperatorFixture f = f0.withLibrary(SqlLibrary.SPARK);
+    f.checkScalar("array_repeat('1', 2)", "[1, 1]",
+        "CHAR(1) NOT NULL ARRAY NOT NULL");
     f.checkScalar("array_repeat(1, 2)", "[1, 1]",
         "INTEGER NOT NULL ARRAY NOT NULL");
     f.checkScalar("array_repeat(1, -2)", "[]",
@@ -6800,7 +7152,7 @@ public class SqlOperatorTest {
     f.checkScalar("array_repeat(map[1, 'a', 2, 'b'], 2)", "[{1=a, 2=b}, {1=a, 2=b}]",
         "(INTEGER NOT NULL, CHAR(1) NOT NULL) MAP NOT NULL ARRAY NOT NULL");
     f.checkScalar("array_repeat(cast(null as integer), 2)", "[null, null]",
-        "INTEGER ARRAY NOT NULL");
+        "INTEGER ARRAY");
     // elements cast
     f.checkScalar("array_repeat(cast(1 as tinyint), 2)", "[1, 1]",
         "TINYINT NOT NULL ARRAY NOT NULL");
@@ -7015,18 +7367,20 @@ public class SqlOperatorTest {
         "[1, 2, null, 3]", "INTEGER ARRAY NOT NULL");
     f1.checkScalar("array_insert(array[2, 3, 4], 1, 1)",
         "[1, 2, 3, 4]", "INTEGER NOT NULL ARRAY NOT NULL");
-    f1.checkScalar("array_insert(array[1, 3, 4], -2, 2)",
+    f1.checkScalar("array_insert(array[1, 3, 4], -1, 2)",
+        "[1, 3, 4, 2]", "INTEGER NOT NULL ARRAY NOT NULL");
+    f1.checkScalar("array_insert(array[1, 3, 4], -3, 2)",
         "[1, 2, 3, 4]", "INTEGER NOT NULL ARRAY NOT NULL");
-    f1.checkScalar("array_insert(array[2, 3, null, 4], -5, 1)",
+    f1.checkScalar("array_insert(array[2, 3, null, 4], -6, 1)",
         "[1, null, 2, 3, null, 4]", "INTEGER ARRAY NOT NULL");
     // check complex type
     f1.checkScalar("array_insert(array[array[1,2]], 1, array[1])",
         "[[1], [1, 2]]", "INTEGER NOT NULL ARRAY NOT NULL ARRAY NOT NULL");
     f1.checkScalar("array_insert(array[array[1,2]], -1, array[1])",
-        "[[1], [1, 2]]", "INTEGER NOT NULL ARRAY NOT NULL ARRAY NOT NULL");
+        "[[1, 2], [1]]", "INTEGER NOT NULL ARRAY NOT NULL ARRAY NOT NULL");
     f1.checkScalar("array_insert(array[map[1, 'a']], 1, map[2, 'b'])", "[{2=b}, {1=a}]",
         "(INTEGER NOT NULL, CHAR(1) NOT NULL) MAP NOT NULL ARRAY NOT NULL");
-    f1.checkScalar("array_insert(array[map[1, 'a']], -1, map[2, 'b'])", "[{2=b}, {1=a}]",
+    f1.checkScalar("array_insert(array[map[1, 'a']], -1, map[2, 'b'])", "[{1=a}, {2=b}]",
         "(INTEGER NOT NULL, CHAR(1) NOT NULL) MAP NOT NULL ARRAY NOT NULL");
 
     // element cast to the biggest type
@@ -7129,10 +7483,13 @@ public class SqlOperatorTest {
     f.checkType("arrays_overlap(array[1, 2], cast(null as integer array))", "BOOLEAN");
     f.checkNull("arrays_overlap(array[1], array[2, null])");
     f.checkType("arrays_overlap(array[2, null], array[1])", "BOOLEAN");
-    f.checkFails("^arrays_overlap(array[1, 2], true)^",
-        "Cannot apply 'ARRAYS_OVERLAP' to arguments of type 'ARRAYS_OVERLAP\\("
-            + "<INTEGER ARRAY>, <BOOLEAN>\\)'. Supported form\\(s\\): 'ARRAYS_OVERLAP\\("
-            + "<EQUIVALENT_TYPE>, <EQUIVALENT_TYPE>\\)'", false);
+    final String expected = "Cannot apply 'ARRAYS_OVERLAP' to arguments of type 'ARRAYS_OVERLAP\\("
+        + "<.*>, <.*>\\)'. Supported form\\(s\\): 'ARRAYS_OVERLAP\\("
+        + "<EQUIVALENT_TYPE>, <EQUIVALENT_TYPE>\\)'";
+    f.checkFails("^arrays_overlap(array[1, 2], true)^", expected, false);
+    f.checkFails("^arrays_overlap(null, null)^", expected, false);
+    f.checkFails("^arrays_overlap(null, array[1])^", expected, false);
+    f.checkFails("^arrays_overlap(array[1], null)^", expected, false);
   }
 
   /** Tests {@code ARRAYS_ZIP} function from Spark. */
@@ -11548,13 +11905,13 @@ public class SqlOperatorTest {
     f.checkScalar("floor(time '12:34:56' to minute)",
         "12:34:00", "TIME(0) NOT NULL");
     f.checkScalar("floor(timestamp '2015-02-19 12:34:56.78' to second)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.00", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("floor(timestamp '2015-02-19 12:34:56.78' to millisecond)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.78", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("floor(timestamp '2015-02-19 12:34:56.78' to microsecond)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.78", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("floor(timestamp '2015-02-19 12:34:56.78' to nanosecond)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.78", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("floor(timestamp '2015-02-19 12:34:56' to minute)",
         "2015-02-19 12:34:00", "TIMESTAMP(0) NOT NULL");
     f.checkScalar("floor(timestamp '2015-02-19 12:34:56' to year)",
@@ -11593,15 +11950,15 @@ public class SqlOperatorTest {
     f.checkScalar("ceil(time '12:59:56' to minute)",
         "13:00:00", "TIME(0) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56.78' to second)",
-        "2015-02-19 12:34:57", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:57.00", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56.78' to millisecond)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.78", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56.78' to microsecond)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.78", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56.78' to nanosecond)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.78", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56.00' to second)",
-        "2015-02-19 12:34:56", "TIMESTAMP(2) NOT NULL");
+        "2015-02-19 12:34:56.00", "TIMESTAMP(2) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56' to minute)",
         "2015-02-19 12:35:00", "TIMESTAMP(0) NOT NULL");
     f.checkScalar("ceil(timestamp '2015-02-19 12:34:56' to year)",
@@ -11737,7 +12094,7 @@ public class SqlOperatorTest {
     MICROSECOND_VARIANTS.forEach(s ->
         f.checkScalar("timestampadd(" + s
                 + ", 2000000, timestamp '2016-02-24 12:42:25')",
-            "2016-02-24 12:42:27",
+            "2016-02-24 12:42:27.000",
             "TIMESTAMP(3) NOT NULL"));
     SECOND_VARIANTS.forEach(s ->
         f.checkScalar("timestampadd(" + s
@@ -11747,12 +12104,12 @@ public class SqlOperatorTest {
     NANOSECOND_VARIANTS.forEach(s ->
         f.checkScalar("timestampadd(" + s
                 + ", 3000000000, timestamp '2016-02-24 12:42:25')",
-            "2016-02-24 12:42:28",
+            "2016-02-24 12:42:28.000",
             "TIMESTAMP(3) NOT NULL"));
     NANOSECOND_VARIANTS.forEach(s ->
         f.checkScalar("timestampadd(" + s
                 + ", 2000000000, timestamp '2016-02-24 12:42:25')",
-            "2016-02-24 12:42:27",
+            "2016-02-24 12:42:27.000",
             "TIMESTAMP(3) NOT NULL"));
     MINUTE_VARIANTS.forEach(s ->
         f.checkScalar("timestampadd(" + s
@@ -12912,8 +13269,8 @@ public class SqlOperatorTest {
     f.checkScalar("FORMAT_DATE('%x', DATE '2008-12-25')",
         "12/25/08",
         "VARCHAR NOT NULL");
-    f.checkScalar("FORMAT_DATE('The date is: %x', DATE '2008-12-25')",
-        "The date is: 12/25/08",
+    f.checkScalar("FORMAT_DATE('%x', DATE '2008-12-25')",
+        "12/25/08",
         "VARCHAR NOT NULL");
     f.checkNull("FORMAT_DATE('%x', CAST(NULL AS DATE))");
     f.checkNull("FORMAT_DATE('%b-%d-%Y', CAST(NULL AS DATE))");
@@ -12956,7 +13313,7 @@ public class SqlOperatorTest {
         "VARCHAR(2000) NOT NULL");
     f.checkScalar("FORMAT_TIMESTAMP('The time is: %R.%E2S',"
             + " TIMESTAMP WITH LOCAL TIME ZONE '2008-12-25 15:30:00.1235456')",
-        "The time is: 15:30.123",
+        "The time is: 15:30.12",
         "VARCHAR(2000) NOT NULL");
   }
 

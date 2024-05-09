@@ -109,12 +109,6 @@ public abstract class Bug {
   public static final boolean FRG254_FIXED = false;
 
   /**
-   * Whether <a href="http://issues.eigenbase.org/browse/FRG-282">issue
-   * FRG-282: Support precision in TIME and TIMESTAMP data types</a> is fixed.
-   */
-  public static final boolean FRG282_FIXED = false;
-
-  /**
    * Whether <a href="http://issues.eigenbase.org/browse/FRG-296">issue
    * FRG-296: SUBSTRING(string FROM regexp FOR regexp)</a> is fixed.
    */
@@ -205,6 +199,21 @@ public abstract class Bug {
    * Invalid test cases in CAST String to Time</a> is fixed.
    * Fix to be available with Avatica 1.24.0 [CALCITE-6053] */
   public static final boolean CALCITE_6092_FIXED = false;
+
+  /** Whether
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6270">[CALCITE-6270]
+   * Support FORMAT in CAST from Numeric and BYTES to String (Enabled in BigQuery)</a> is fixed. */
+  public static final boolean CALCITE_6270_FIXED = false;
+
+  /** Whether
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6367">[CALCITE-6367]
+   * Add timezone support for FORMAT clause in CAST (enabled in BigQuery)</a> is fixed. */
+  public static final boolean CALCITE_6367_FIXED = false;
+
+  /** Whether
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6375">[CALCITE-6375]
+   * Fix failing quidem tests for FORMAT in CAST</a> is fixed. */
+  public static final boolean CALCITE_6375_FIXED = false;
 
   /**
    * Use this to flag temporary code.

@@ -205,8 +205,6 @@ public class SqlFunctions {
   private static final ThreadLocal<@Nullable Map<String, AtomicLong>> THREAD_SEQUENCES =
       ThreadLocal.withInitial(HashMap::new);
 
-  private static final Pattern PATTERN_0_STAR_E = Pattern.compile("0*E");
-
   /** A byte string consisting of a single byte that is the ASCII space
    * character (0x20). */
   private static final ByteString SINGLE_SPACE_BYTE_STRING =
@@ -401,10 +399,16 @@ public class SqlFunctions {
     /** Validate regex arguments in REGEXP_* fns, throws an exception
      * for invalid regex patterns, else returns a Pattern object. */
     private Pattern validateRegexPattern(String regex, String methodName) {
+      return validateRegexPattern(regex, methodName, 0);
+    }
+
+    /** Validate regex arguments in REGEXP_* fns, throws an exception
+     * for invalid regex patterns, else returns a Pattern object. */
+    private Pattern validateRegexPattern(String regex, String methodName, int flags) {
       try {
         // Uses java.util.regex as a standard for regex processing
         // in Calcite instead of RE2 used by BigQuery/GoogleSQL
-        return cache.getUnchecked(new Key(0, regex));
+        return cache.getUnchecked(new Key(flags, regex));
       } catch (UncheckedExecutionException e) {
         if (e.getCause() instanceof PatternSyntaxException) {
           throw RESOURCE.invalidRegexInputForRegexpFunctions(
@@ -486,6 +490,14 @@ public class SqlFunctions {
       return pattern.matcher(value).find();
     }
 
+    /** SQL {@code REGEXP_LIKE(value, regexp, flags)} function.
+     * Throws a runtime exception for invalid regular expressions. */
+    @SuppressWarnings("unused")
+    public boolean regexpLike(String value, String regex, String stringFlags) {
+      final Pattern pattern =
+          validateRegexPattern(regex, "REGEXP_LIKE", makeRegexpFlags(stringFlags));
+      return pattern.matcher(value).find();
+    }
     /** SQL {@code REGEXP_EXTRACT(value, regexp)} function.
      * Returns NULL if there is no match. Returns an exception if regex is invalid.
      * Uses position=1 and occurrence=1 as default values when not specified. */
@@ -680,7 +692,14 @@ public class SqlFunctions {
           flags |= Pattern.DOTALL;
           break;
         case 'm':
+          // PostgreSQL should actually interpret m to be a synonym for n, but this is
+          // relaxed for consistency.
           flags |= Pattern.MULTILINE;
+          break;
+        case 's':
+          // This flag is in PostgreSQL but doesn't apply to other libraries. This is relaxed
+          // for consistency.
+          flags &= ~Pattern.DOTALL;
           break;
         default:
           throw RESOURCE.invalidInputForRegexpReplace(stringFlags).ex();
@@ -3492,10 +3511,7 @@ public class SqlFunctions {
     if (x == 0) {
       return "0E0";
     }
-    BigDecimal bigDecimal =
-        new BigDecimal(x, MathContext.DECIMAL32).stripTrailingZeros();
-    final String s = bigDecimal.toString();
-    return PATTERN_0_STAR_E.matcher(s).replaceAll("E").replace("E+", "E");
+    return Float.toString(x);
   }
 
   /** CAST(DOUBLE AS VARCHAR). */
@@ -3503,10 +3519,7 @@ public class SqlFunctions {
     if (x == 0) {
       return "0E0";
     }
-    BigDecimal bigDecimal =
-        new BigDecimal(x, MathContext.DECIMAL64).stripTrailingZeros();
-    final String s = bigDecimal.toString();
-    return PATTERN_0_STAR_E.matcher(s).replaceAll("E").replace("E+", "E");
+    return Double.toString(x);
   }
 
   /** CAST(DECIMAL AS VARCHAR). */
@@ -4009,7 +4022,7 @@ public class SqlFunctions {
       return sb.toString();
     }
 
-    public String formatTimestamp(DataContext ctx, String fmtString,
+    public String formatTimestamp(String fmtString,
         long timestamp) {
       return internalFormatDatetime(fmtString, internalToTimestamp(timestamp));
     }
@@ -4022,11 +4035,45 @@ public class SqlFunctions {
       return sb.toString().trim();
     }
 
-    public String formatDate(DataContext ctx, String fmtString, int date) {
+    public int toDate(String dateString, String fmtString) {
+      return toInt(
+          new java.sql.Date(internalToDateTime(dateString, fmtString)));
+    }
+
+    public long toTimestamp(String timestampString, String fmtString) {
+      return toLong(
+          new java.sql.Timestamp(internalToDateTime(timestampString, fmtString)));
+    }
+
+    private long internalToDateTime(String dateString, String fmtString) {
+      final ParsePosition pos = new ParsePosition(0);
+
+      sb.setLength(0);
+      withElements(FormatModels.POSTGRESQL, fmtString, elements ->
+          elements.forEach(element -> element.toPattern(sb)));
+      final String dateFormatString = sb.toString().trim();
+
+      final SimpleDateFormat sdf = new SimpleDateFormat(dateFormatString, Locale.ENGLISH);
+      final Date date = sdf.parse(dateString, pos);
+      if (pos.getErrorIndex() >= 0 || pos.getIndex() != dateString.length()) {
+        SQLException e =
+            new SQLException(
+                String.format(Locale.ROOT,
+                    "Invalid format: '%s' for datetime string: '%s'.", fmtString,
+                    dateString));
+        throw Util.toUnchecked(e);
+      }
+
+      @SuppressWarnings("JavaUtilDate")
+      final long millisSinceEpoch = date.getTime();
+      return millisSinceEpoch;
+    }
+
+    public String formatDate(String fmtString, int date) {
       return internalFormatDatetime(fmtString, internalToDate(date));
     }
 
-    public String formatTime(DataContext ctx, String fmtString, int time) {
+    public String formatTime(String fmtString, int time) {
       return internalFormatDatetime(fmtString, internalToTime(time));
     }
   }
@@ -4517,6 +4564,14 @@ public class SqlFunctions {
       } else {
         return length < maxLength ? Spaces.padRight(s, maxLength) : s;
       }
+    }
+  }
+
+  public static @PolyNull ByteString stringToBinary(@PolyNull String s, Charset charset) {
+    if (s == null) {
+      return null;
+    } else {
+      return new ByteString(s.getBytes(charset));
     }
   }
 
@@ -5285,7 +5340,7 @@ public class SqlFunctions {
   }
 
   /** Support the ARRAY_REPEAT function. */
-  public static @Nullable List<Object> repeat(Object element, Object count) {
+  public static @Nullable List<Object> arrayRepeat(Object element, Object count) {
     if (count == null) {
       return null;
     }
@@ -5316,6 +5371,10 @@ public class SqlFunctions {
           + "and not exceeds the allowed limit.");
     }
 
+    if (posInt == -1) {
+      // This means "append to the array"
+      posInt = baseArray.length + 1;
+    }
     boolean usePositivePos = posInt > 0;
 
     if (usePositivePos) {
@@ -5341,7 +5400,10 @@ public class SqlFunctions {
 
       return Arrays.asList(newArray);
     } else {
-      int posIndex = posInt;
+      // 1-based index.
+      // The behavior of this function was changed in Spark 3.4.0.
+      // https://issues.apache.org/jira/browse/SPARK-44840
+      int posIndex = posInt + 1;
 
       boolean newPosExtendsArrayLeft = baseArray.length + posIndex < 0;
 

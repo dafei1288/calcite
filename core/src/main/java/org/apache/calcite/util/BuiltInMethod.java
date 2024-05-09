@@ -124,6 +124,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.nio.charset.Charset;
 import java.sql.ResultSet;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -563,6 +564,8 @@ public enum BuiltInMethod {
       String.class, String.class, int.class, int.class),
   REGEXP_INSTR5(SqlFunctions.RegexFunction.class, "regexpInstr",
       String.class, String.class, int.class, int.class, int.class),
+  REGEXP_LIKE3(SqlFunctions.RegexFunction.class, "regexpLike",
+      String.class, String.class, String.class),
   REGEXP_REPLACE3(SqlFunctions.RegexFunction.class, "regexpReplace",
       String.class, String.class, String.class),
   REGEXP_REPLACE4(SqlFunctions.RegexFunction.class, "regexpReplace",
@@ -602,6 +605,7 @@ public enum BuiltInMethod {
       String.class, TimeZone.class),
   STRING_TO_TIMESTAMP_WITH_LOCAL_TIME_ZONE(SqlFunctions.class, "toTimestampWithLocalTimeZone",
       String.class),
+  STRING_TO_BINARY(SqlFunctions.class, "stringToBinary", String.class, Charset.class),
   TIMESTAMP_STRING_TO_TIMESTAMP_WITH_LOCAL_TIME_ZONE(SqlFunctions.class,
       "toTimestampWithLocalTimeZone", String.class, TimeZone.class),
   TIME_WITH_LOCAL_TIME_ZONE_TO_TIME(SqlFunctions.class, "timeWithLocalTimeZoneToTime",
@@ -643,13 +647,17 @@ public enum BuiltInMethod {
   PARSE_TIMESTAMP(SqlFunctions.DateParseFunction.class, "parseTimestamp",
       String.class, String.class),
   FORMAT_TIMESTAMP(SqlFunctions.DateFormatFunction.class, "formatTimestamp",
-      DataContext.class, String.class, long.class),
+      String.class, long.class),
   TO_CHAR(SqlFunctions.DateFormatFunction.class, "toChar", long.class,
       String.class),
+  TO_DATE(SqlFunctions.DateFormatFunction.class, "toDate", String.class,
+      String.class),
+  TO_TIMESTAMP(SqlFunctions.DateFormatFunction.class, "toTimestamp", String.class,
+      String.class),
   FORMAT_DATE(SqlFunctions.DateFormatFunction.class, "formatDate",
-      DataContext.class, String.class, int.class),
+      String.class, int.class),
   FORMAT_TIME(SqlFunctions.DateFormatFunction.class, "formatTime",
-      DataContext.class, String.class, int.class),
+      String.class, int.class),
   UNIX_DATE_TO_STRING(DateTimeUtils.class, "unixDateToString", int.class),
   UNIX_TIME_TO_STRING(DateTimeUtils.class, "unixTimeToString", int.class),
   UNIX_TIMESTAMP_TO_STRING(DateTimeUtils.class, "unixTimestampToString",
@@ -769,7 +777,7 @@ public enum BuiltInMethod {
   ARRAY_POSITION(SqlFunctions.class, "arrayPosition", List.class, Object.class),
   ARRAY_PREPEND(SqlFunctions.class, "arrayPrepend", List.class, Object.class),
   ARRAY_REMOVE(SqlFunctions.class, "arrayRemove", List.class, Object.class),
-  ARRAY_REPEAT(SqlFunctions.class, "repeat", Object.class, Integer.class),
+  ARRAY_REPEAT(SqlFunctions.class, "arrayRepeat", Object.class, Integer.class),
   ARRAY_EXCEPT(SqlFunctions.class, "arrayExcept", List.class, List.class),
   ARRAY_INSERT(SqlFunctions.class, "arrayInsert", List.class, Integer.class, Object.class),
   ARRAY_INTERSECT(SqlFunctions.class, "arrayIntersect", List.class, List.class),

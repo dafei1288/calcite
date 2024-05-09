@@ -279,7 +279,9 @@ import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_BASE32;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_BASE64;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_CHAR;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_CODE_POINTS;
+import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_DATE;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_HEX;
+import static org.apache.calcite.sql.fun.SqlLibraryOperators.TO_TIMESTAMP;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRANSLATE3;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRUNC_BIG_QUERY;
 import static org.apache.calcite.sql.fun.SqlLibraryOperators.TRY_CAST;
@@ -601,7 +603,7 @@ public class RexImpTable {
       defineReflective(PARSE_URL, BuiltInMethod.PARSE_URL2.method,
           BuiltInMethod.PARSE_URL3.method);
       defineReflective(REGEXP, BuiltInMethod.RLIKE.method);
-      defineReflective(REGEXP_LIKE, BuiltInMethod.RLIKE.method);
+      defineReflective(REGEXP_LIKE, BuiltInMethod.RLIKE.method, BuiltInMethod.REGEXP_LIKE3.method);
       defineReflective(REGEXP_CONTAINS, BuiltInMethod.REGEXP_CONTAINS.method);
       defineReflective(REGEXP_EXTRACT, BuiltInMethod.REGEXP_EXTRACT2.method,
           BuiltInMethod.REGEXP_EXTRACT3.method, BuiltInMethod.REGEXP_EXTRACT4.method);
@@ -783,6 +785,8 @@ public class RexImpTable {
 
       // Datetime formatting methods
       defineReflective(TO_CHAR, BuiltInMethod.TO_CHAR.method);
+      defineReflective(TO_DATE, BuiltInMethod.TO_DATE.method);
+      defineReflective(TO_TIMESTAMP, BuiltInMethod.TO_TIMESTAMP.method);
       final FormatDatetimeImplementor datetimeFormatImpl =
           new FormatDatetimeImplementor();
       map.put(FORMAT_DATE, datetimeFormatImpl);
@@ -2788,7 +2792,7 @@ public class RexImpTable {
         method = BuiltInMethod.FORMAT_TIMESTAMP.method;
       }
       return implementSafe(method,
-          ImmutableList.of(translator.getRoot(), operand0, operand1));
+          ImmutableList.of(operand0, operand1));
     }
   }
 
@@ -3279,11 +3283,23 @@ public class RexImpTable {
 
     @Override Expression implementSafe(final RexToLixTranslator translator,
         final RexCall call, final List<Expression> argValueList) {
-      assert call.getOperands().size() == 1;
+      assert call.operandCount() <= 2;
       final RelDataType sourceType = call.getOperands().get(0).getType();
 
-      // Short-circuit if no cast is required
       RexNode arg = call.getOperands().get(0);
+      ConstantExpression formatExpr;
+
+      // Check for FORMAT clause if second operand is available in RexCall.
+      if (call.operandCount() == 2) {
+        RexLiteral format = (RexLiteral) translator.deref(call.getOperands().get(1));
+        formatExpr =
+            (ConstantExpression) RexToLixTranslator.translateLiteral(format, format.getType(),
+                translator.typeFactory, NullAs.NULL);
+      } else {
+        formatExpr = NULL_EXPR;
+      }
+
+      // Short-circuit if no cast is required
       if (call.getType().equals(sourceType)) {
         // No cast required, omit cast
         return argValueList.get(0);
@@ -3299,7 +3315,7 @@ public class RexImpTable {
           nullifyType(translator.typeFactory, call.getType(), false);
       boolean safe = call.getKind() == SqlKind.SAFE_CAST;
       return translator.translateCast(sourceType,
-              targetType, argValueList.get(0), safe);
+          targetType, argValueList.get(0), safe, formatExpr);
     }
 
     private static RelDataType nullifyType(JavaTypeFactory typeFactory,
@@ -3349,7 +3365,7 @@ public class RexImpTable {
     }
   }
 
-  /** Implementor for a array concat. */
+  /** Implementor for array concat. */
   private static class ArrayConcatImplementor extends AbstractRexCallImplementor {
     ArrayConcatImplementor() {
       super("array_concat", NullPolicy.STRICT, false);
@@ -3364,10 +3380,11 @@ public class RexImpTable {
       for (Expression expression : argValueList) {
         blockBuilder.add(
             Expressions.ifThenElse(
-                Expressions.or(
+                Expressions.orElse(
                     Expressions.equal(nullValue, list),
                     Expressions.equal(nullValue, expression)),
-                Expressions.assign(list, nullValue),
+                Expressions.statement(
+                    Expressions.assign(list, nullValue)),
                 Expressions.statement(
                     Expressions.call(list,
                         BuiltInMethod.COLLECTION_ADDALL.method, expression))));
@@ -3638,6 +3655,7 @@ public class RexImpTable {
         }
         break;
       case TIME:
+        trop1 = normalize(typeName, trop1);
         trop1 = Expressions.convert_(trop1, int.class);
         break;
       default:
