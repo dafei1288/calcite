@@ -32,6 +32,7 @@ import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlFunction;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlIntervalQualifier;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlLiteral;
@@ -73,6 +74,12 @@ public class MysqlSqlDialect extends SqlDialect {
           default:
             return super.getMaxPrecision(typeName);
           }
+        }
+        @Override public int getDefaultPrecision(SqlTypeName typeName) {
+          if (typeName == SqlTypeName.CHAR) {
+            return RelDataType.PRECISION_NOT_SPECIFIED;
+          }
+          return super.getDefaultPrecision(typeName);
         }
       };
 
@@ -199,7 +206,8 @@ public class MysqlSqlDialect extends SqlDialect {
     //   END
     final SqlNode caseExpr =
         new SqlCase(SqlParserPos.ZERO,
-            SqlStdOperatorTable.COUNT.createCall(SqlParserPos.ZERO, operand),
+            SqlStdOperatorTable.COUNT.createCall(SqlParserPos.ZERO,
+                ImmutableList.of(SqlIdentifier.STAR)),
             SqlNodeList.of(
                 SqlLiteral.createExactNumeric("0", SqlParserPos.ZERO),
                 SqlLiteral.createExactNumeric("1", SqlParserPos.ZERO)),
@@ -247,6 +255,27 @@ public class MysqlSqlDialect extends SqlDialect {
 
     case LISTAGG:
       unparseListAggCall(writer, call, null, leftPrec, rightPrec);
+      break;
+
+    case EXTRACT:
+      SqlLiteral node = call.operand(0);
+      TimeUnitRange unit = node.getValueAs(TimeUnitRange.class);
+      String funName;
+      switch (unit) {
+      case DOW:
+        funName = "DAYOFWEEK";
+        break;
+      case DOY:
+        funName = "DAYOFYEAR";
+        break;
+      default:
+        super.unparseCall(writer, call, leftPrec, rightPrec);
+        return;
+      }
+      writer.print(funName);
+      final SqlWriter.Frame extractFrame = writer.startList("(", ")");
+      call.operand(1).unparse(writer, 0, 0);
+      writer.endList(extractFrame);
       break;
 
     default:

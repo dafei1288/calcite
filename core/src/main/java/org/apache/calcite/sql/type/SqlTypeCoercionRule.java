@@ -16,15 +16,16 @@
  */
 package org.apache.calcite.sql.type;
 
+import org.apache.calcite.util.TryThreadLocal;
+
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * Rules that determine whether a type is castable from another type.
@@ -77,8 +78,7 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
 
   private static final SqlTypeCoercionRule LENIENT_INSTANCE;
 
-  public static final ThreadLocal<@Nullable SqlTypeCoercionRule> THREAD_PROVIDERS =
-      ThreadLocal.withInitial(() -> SqlTypeCoercionRule.INSTANCE);
+  public static final TryThreadLocal<SqlTypeCoercionRule> THREAD_PROVIDERS;
 
   //~ Instance fields --------------------------------------------------------
 
@@ -160,6 +160,7 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
         coerceRules.copyValues(SqlTypeName.BINARY)
             .add(SqlTypeName.VARBINARY)
             .addAll(SqlTypeName.CHAR_TYPES)
+            .add(SqlTypeName.UUID)
             .build());
 
     // VARBINARY is castable from BINARY, CHARACTERS.
@@ -167,6 +168,7 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
         coerceRules.copyValues(SqlTypeName.VARBINARY)
             .add(SqlTypeName.BINARY)
             .addAll(SqlTypeName.CHAR_TYPES)
+            .add(SqlTypeName.UUID)
             .build());
 
     // VARCHAR is castable from BOOLEAN, DATE, TIME, TIMESTAMP, numeric types, binary and
@@ -185,6 +187,7 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
             .addAll(SqlTypeName.BINARY_TYPES)
             .addAll(SqlTypeName.NUMERIC_TYPES)
             .addAll(SqlTypeName.INTERVAL_TYPES)
+            .add(SqlTypeName.UUID)
             .build());
 
     // CHAR is castable from BOOLEAN, DATE, TIME, TIMESTAMP, numeric types, binary and
@@ -203,6 +206,7 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
             .addAll(SqlTypeName.BINARY_TYPES)
             .addAll(SqlTypeName.NUMERIC_TYPES)
             .addAll(SqlTypeName.INTERVAL_TYPES)
+            .add(SqlTypeName.UUID)
             .build());
 
     // BOOLEAN is castable from ...
@@ -211,6 +215,15 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
             .add(SqlTypeName.CHAR)
             .add(SqlTypeName.VARCHAR)
             .addAll(SqlTypeName.NUMERIC_TYPES)
+            .build());
+
+    // UUID is castable from ...
+    coerceRules.add(SqlTypeName.UUID,
+        coerceRules.copyValues(SqlTypeName.UUID)
+            .add(SqlTypeName.VARCHAR)
+            .add(SqlTypeName.CHAR)
+            .add(SqlTypeName.BINARY)
+            .add(SqlTypeName.VARBINARY)
             .build());
 
     // DATE, TIME, and TIMESTAMP are castable from
@@ -351,13 +364,14 @@ public class SqlTypeCoercionRule implements SqlTypeMappingRule {
             .build());
 
     LENIENT_INSTANCE = new SqlTypeCoercionRule(coerceRules.map);
+    THREAD_PROVIDERS = TryThreadLocal.of(SqlTypeCoercionRule.INSTANCE);
   }
 
   //~ Methods ----------------------------------------------------------------
 
   /** Returns an instance. */
   public static SqlTypeCoercionRule instance() {
-    return Objects.requireNonNull(THREAD_PROVIDERS.get(), "threadProviders");
+    return requireNonNull(THREAD_PROVIDERS.get(), "threadProviders");
   }
 
   /** Returns an instance that allows more lenient type coercion. */

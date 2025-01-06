@@ -40,6 +40,7 @@ import org.apache.calcite.sql.SqlTimeTzLiteral;
 import org.apache.calcite.sql.SqlTimestampLiteral;
 import org.apache.calcite.sql.SqlTimestampTzLiteral;
 import org.apache.calcite.sql.SqlUtil;
+import org.apache.calcite.sql.SqlUuidLiteral;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.impl.SqlParserImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -49,6 +50,7 @@ import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimeWithTimeZoneString;
 import org.apache.calcite.util.TimestampString;
 import org.apache.calcite.util.TimestampWithTimeZoneString;
+import org.apache.calcite.util.TryThreadLocal;
 import org.apache.calcite.util.Util;
 import org.apache.calcite.util.trace.CalciteTrace;
 
@@ -70,6 +72,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.StringTokenizer;
 import java.util.TimeZone;
+import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
@@ -391,6 +394,11 @@ public final class SqlParserUtil {
       String s, SqlParserPos pos) {
     return parseTimestampLiteral(SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE, s,
         pos);
+  }
+
+  public static SqlUuidLiteral parseUuidLiteral(String s, SqlParserPos pos) {
+    UUID uuid = UUID.fromString(s);
+    return SqlLiteral.createUuid(uuid, pos);
   }
 
   public static SqlTimestampTzLiteral parseTimestampTzLiteral(
@@ -1214,11 +1222,11 @@ public final class SqlParserUtil {
   /** Pre-initialized {@link DateFormat} objects, to be used within the current
    * thread, because {@code DateFormat} is not thread-safe. */
   private static class Format {
-    private static final ThreadLocal<@Nullable Format> PER_THREAD =
-        ThreadLocal.withInitial(Format::new);
+    private static final TryThreadLocal<Format> PER_THREAD =
+        TryThreadLocal.withInitial(Format::new);
 
     private static Format get() {
-      return requireNonNull(PER_THREAD.get(), "PER_THREAD.get()");
+      return PER_THREAD.get();
     }
 
     final DateFormat timestamp =

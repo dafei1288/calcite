@@ -51,6 +51,7 @@ import org.checkerframework.checker.nullness.qual.EnsuresNonNullIf;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.Charset;
 import java.util.AbstractList;
 import java.util.ArrayList;
@@ -84,7 +85,7 @@ public abstract class SqlTypeUtil {
    * comparable, i.e. of the same charset and collation of same charset
    */
   public static boolean isCharTypeComparable(List<RelDataType> argTypes) {
-    assert argTypes != null;
+    requireNonNull(argTypes, "argTypes");
     assert argTypes.size() >= 2;
 
     // Filter out ANY and NULL elements.
@@ -329,6 +330,10 @@ public abstract class SqlTypeUtil {
   public static RelDataType keepSourceTypeAndTargetNullability(RelDataType sourceRelDataType,
                                              RelDataType targetRelDataType,
                                              RelDataTypeFactory typeFactory) {
+    checkArgument(
+        (targetRelDataType.isStruct() && sourceRelDataType.isStruct())
+            || (!targetRelDataType.isStruct() && !sourceRelDataType.isStruct()),
+        "one is a struct, while the other one is not");
     if (!targetRelDataType.isStruct()) {
       return typeFactory.createTypeWithNullability(
               sourceRelDataType, targetRelDataType.isNullable());
@@ -590,17 +595,34 @@ public abstract class SqlTypeUtil {
       }
       return true;
     }
-    RelDataType comp1 = t1.getComponentType();
-    RelDataType comp2 = t2.getComponentType();
-    if ((comp1 != null) || (comp2 != null)) {
-      if ((comp1 == null) || (comp2 == null)) {
+    SqlTypeName t1Name = t1.getSqlTypeName();
+    SqlTypeName t2Name = t2.getSqlTypeName();
+    if (t1Name == SqlTypeName.ARRAY || t1Name == SqlTypeName.MULTISET) {
+      if (t1Name != t2Name) {
         return false;
       }
-      if (!sameNamedType(comp1, comp2)) {
-        return false;
-      }
+
+      RelDataType comp1 = requireNonNull(t1.getComponentType());
+      RelDataType comp2 = requireNonNull(t2.getComponentType());
+      return sameNamedType(comp1, comp2);
     }
-    return t1.getSqlTypeName() == t2.getSqlTypeName();
+
+    if (t1Name == SqlTypeName.MAP) {
+      if (t1Name != t2Name) {
+        return false;
+      }
+
+      RelDataType keyType1 = requireNonNull(t1.getKeyType());
+      RelDataType keyType2 = requireNonNull(t2.getKeyType());
+      if (!sameNamedType(keyType1, keyType2)) {
+        return false;
+      }
+      RelDataType valueType1 = requireNonNull(t1.getValueType());
+      RelDataType valueType2 = requireNonNull(t2.getValueType());
+      return sameNamedType(valueType1, valueType2);
+    }
+
+    return t1Name == t2Name;
   }
 
   /**
@@ -767,6 +789,10 @@ public abstract class SqlTypeUtil {
     return t.getFamily() == SqlTypeFamily.ANY;
   }
 
+  private static boolean isVariant(RelDataType t) {
+    return t.getFamily() == SqlTypeFamily.VARIANT;
+  }
+
   public static boolean isMeasure(RelDataType t) {
     return t instanceof MeasureSqlType;
   }
@@ -890,7 +916,7 @@ public abstract class SqlTypeUtil {
       return canCastFrom(toType, requireNonNull(fromType.getMeasureElementType()),
                          typeMappingRule);
     }
-    if (isAny(toType) || isAny(fromType)) {
+    if (isAny(toType) || isAny(fromType) || isVariant(toType) || isVariant(fromType)) {
       return true;
     }
 
@@ -898,6 +924,11 @@ public abstract class SqlTypeUtil {
     final SqlTypeName toTypeName = toType.getSqlTypeName();
     if (toTypeName == SqlTypeName.UNKNOWN) {
       return true;
+    }
+    if (toType.getSqlTypeName() == SqlTypeName.UUID) {
+      return fromType.getSqlTypeName() == SqlTypeName.UUID
+          || fromType.getFamily() == SqlTypeFamily.CHARACTER
+          || fromType.getFamily() == SqlTypeFamily.BINARY;
     }
     if (toType.isStruct() || fromType.isStruct()) {
       if (toTypeName == SqlTypeName.DISTINCT) {
@@ -1096,18 +1127,19 @@ public abstract class SqlTypeUtil {
 
     // TODO jvs 28-Dec-2004:  support row types, user-defined types,
     // interval types, multiset types, etc
-    assert typeName != null;
+    requireNonNull(typeName, "typeName");
 
     final SqlTypeNameSpec typeNameSpec;
     if (isAtomic(type) || isNull(type)
         || type.getSqlTypeName() == SqlTypeName.UNKNOWN
         || type.getSqlTypeName() == SqlTypeName.GEOMETRY) {
-      int precision = typeName.allowsPrec() ? type.getPrecision() : -1;
+      int precision =
+          typeName.allowsPrec() ? type.getPrecision() : RelDataType.PRECISION_NOT_SPECIFIED;
       // fix up the precision.
       if (maxPrecision > 0 && precision > maxPrecision) {
         precision = maxPrecision;
       }
-      int scale = typeName.allowsScale() ? type.getScale() : -1;
+      int scale = typeName.allowsScale() ? type.getScale() :  RelDataType.SCALE_NOT_SPECIFIED;
       if (maxScale > 0 && scale > maxScale) {
         scale = maxScale;
       }
@@ -1161,7 +1193,8 @@ public abstract class SqlTypeUtil {
   public static SqlDataTypeSpec convertTypeToSpec(RelDataType type) {
     // TODO jvs 28-Dec-2004:  collation
     String charSetName = inCharFamily(type) ? type.getCharset().name() : null;
-    return convertTypeToSpec(type, charSetName, -1, -1);
+    return convertTypeToSpec(type, charSetName,
+        RelDataType.PRECISION_NOT_SPECIFIED, RelDataType.SCALE_NOT_SPECIFIED);
   }
 
   public static RelDataType createMultisetType(
@@ -1493,6 +1526,28 @@ public abstract class SqlTypeUtil {
       return true;
     }
 
+    SqlTypeName type1Name = type1.getSqlTypeName();
+    SqlTypeName type2Name = type2.getSqlTypeName();
+    if (type1Name == SqlTypeName.ARRAY || type1Name == SqlTypeName.MULTISET) {
+      if (type2Name != type1Name) {
+        return false;
+      }
+      RelDataType elementType1 = requireNonNull(type1.getComponentType());
+      RelDataType elementType2 = requireNonNull(type2.getComponentType());
+      return isComparable(elementType1, elementType2);
+    }
+
+    if (type1Name == SqlTypeName.MAP) {
+      if (type2Name != type1Name) {
+        return false;
+      }
+      RelDataType keyType1 = requireNonNull(type1.getKeyType());
+      RelDataType keyType2 = requireNonNull(type2.getKeyType());
+      RelDataType valueType1 = requireNonNull(type1.getValueType());
+      RelDataType valueType2 = requireNonNull(type2.getValueType());
+      return isComparable(keyType1, keyType2) && isComparable(valueType1, valueType2);
+    }
+
     final RelDataTypeFamily family1 = family(type1);
     final RelDataTypeFamily family2 = family(type2);
     if (family1 == family2) {
@@ -1512,14 +1567,10 @@ public abstract class SqlTypeUtil {
     }
 
     // We can implicitly convert from character to date
-    if (family1 == SqlTypeFamily.CHARACTER
+    return family1 == SqlTypeFamily.CHARACTER
         && canConvertStringInCompare(family2)
         || family2 == SqlTypeFamily.CHARACTER
-        && canConvertStringInCompare(family1)) {
-      return true;
-    }
-
-    return false;
+        && canConvertStringInCompare(family1);
   }
 
   /** Returns the least restrictive type T, such that a value of type T can be
@@ -1802,6 +1853,7 @@ public abstract class SqlTypeUtil {
 
   /** Returns a DECIMAL type with the maximum precision for the current
    * type system. */
+  @SuppressWarnings("deprecation") // [CALCITE-6598]
   public static RelDataType getMaxPrecisionScaleDecimal(RelDataTypeFactory factory) {
     int maxPrecision = factory.getTypeSystem().getMaxNumericPrecision();
     int maxScale = factory.getTypeSystem().getMaxNumericScale();
@@ -1820,6 +1872,35 @@ public abstract class SqlTypeUtil {
     final int fieldsCnt = type.getFieldCount();
     return typeFactory.createStructType(
         type.getFieldList().subList(fieldsCnt - numToKeep, fieldsCnt));
+  }
+
+  /**
+   * Returns whether the decimal value can be represented without information loss
+   * using the specified type.
+   * For example, 1111.11
+   * - cannot be represented exactly using DECIMAL(3, 1) since it overflows.
+   * - cannot be represented exactly using DECIMAL(6, 3) since it overflows.
+   * - cannot be represented exactly using DECIMAL(6, 1) since it requires rounding.
+   * - can be represented exactly using DECIMAL(6, 2)
+   *
+   * @param value  A decimal value
+   * @param toType A DECIMAL type.
+   * @return whether the value is valid for the type
+   */
+  public static boolean canBeRepresentedExactly(@Nullable BigDecimal value, RelDataType toType) {
+    assert toType.getSqlTypeName() == SqlTypeName.DECIMAL;
+    if (value == null) {
+      return true;
+    }
+    value = value.stripTrailingZeros();
+    if (value.scale() < 0) {
+      // Negative scale, convert to 0 scale.
+      // Rounding mode is irrelevant, since value is integer
+      value = value.setScale(0, RoundingMode.DOWN);
+    }
+    final int intDigits = value.precision() - value.scale();
+    final int maxIntDigits = toType.getPrecision() - toType.getScale();
+    return (intDigits <= maxIntDigits) && (value.scale() <= toType.getScale());
   }
 
   /**
@@ -1842,5 +1923,36 @@ public abstract class SqlTypeUtil {
     default:
       return true;
     }
+  }
+
+  /** Strips MEASURE wrappers from a type.
+   *
+   * <p>For example:
+   * <ul>
+   *   <li>"{@code INTEGER}" remains "{@code INTEGER}";
+   *   <li>"{@code MEASURE<DECIMAL>}" becomes "{@code DECIMAL}";
+   *   <li>"{@code (empno INTEGER NOT NULL, rating MEASURE<DECIMAL>)}"
+   *     becomes "{@code (empno INTEGER NOT NULL, rating DECIMAL)}".
+   * </ul>
+   */
+  public static RelDataType fromMeasure(RelDataTypeFactory typeFactory,
+      RelDataType type) {
+    if (type.isStruct()) {
+      final RelDataTypeFactory.Builder builder = typeFactory.builder();
+      int changeCount = 0;
+      for (RelDataTypeField field : type.getFieldList()) {
+        final RelDataType type2 = fromMeasure(typeFactory, field.getType());
+        if (type2 != field.getType()) {
+          ++changeCount;
+        }
+        builder.add(field.getName(), type2);
+      }
+      // Avoid the effort of re-creating the same type
+      return changeCount == 0 ? type : builder.build();
+    }
+    if (type.isMeasure()) {
+      return ((MeasureSqlType) type).types.get(0);
+    }
+    return type;
   }
 }

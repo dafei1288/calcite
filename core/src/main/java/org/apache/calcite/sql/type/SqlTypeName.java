@@ -132,7 +132,11 @@ public enum SqlTypeName {
   GEOMETRY(PrecScale.NO_NO, false, ExtraSqlTypes.GEOMETRY, SqlTypeFamily.GEO),
   MEASURE(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.ANY),
   FUNCTION(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.FUNCTION),
-  SARG(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.ANY);
+  SARG(PrecScale.NO_NO, true, Types.OTHER, SqlTypeFamily.ANY),
+  UUID(PrecScale.NO_NO, false, Types.OTHER, SqlTypeFamily.UUID),
+  /** VARIANT data type, a dynamically-typed value that can have at runtime
+   * any of the other data types in this table. */
+  VARIANT(PrecScale.NO_NO, false, Types.OTHER, SqlTypeFamily.VARIANT);
 
   public static final int MAX_DATETIME_PRECISION = 3;
 
@@ -165,13 +169,13 @@ public enum SqlTypeName {
           INTERVAL_HOUR_SECOND, INTERVAL_MINUTE, INTERVAL_MINUTE_SECOND,
           INTERVAL_SECOND, TIME_WITH_LOCAL_TIME_ZONE, TIME_TZ,
           TIMESTAMP_WITH_LOCAL_TIME_ZONE, TIMESTAMP_TZ,
-          FLOAT, MULTISET, DISTINCT, STRUCTURED, ROW, CURSOR, COLUMN_LIST);
+          FLOAT, MULTISET, DISTINCT, STRUCTURED, ROW, CURSOR, COLUMN_LIST, VARIANT);
 
   public static final List<SqlTypeName> BOOLEAN_TYPES =
       ImmutableList.of(BOOLEAN);
 
   public static final List<SqlTypeName> BINARY_TYPES =
-      ImmutableList.of(BINARY, VARBINARY);
+      ImmutableList.of(BINARY, VARBINARY, UUID);
 
   public static final List<SqlTypeName> INT_TYPES =
       ImmutableList.of(TINYINT, SMALLINT, INTEGER, BIGINT);
@@ -282,7 +286,7 @@ public enum SqlTypeName {
   private final int signatures;
 
   /**
-   * Returns true if not of a "pure" standard sql type. "Inpure" types are
+   * Returns true if not of a "pure" standard sql type. "Inpure" types include
    * {@link #ANY}, {@link #NULL} and {@link #SYMBOL}
    */
   private final boolean special;
@@ -394,7 +398,13 @@ public enum SqlTypeName {
   }
 
   /** Returns the default scale for this type if supported, otherwise -1 if
-   * scale is either unsupported or must be specified explicitly. */
+   * scale is either unsupported or must be specified explicitly.
+   *
+   * @deprecated
+   * Use {@link org.apache.calcite.rel.type.RelDataTypeSystem#getDefaultScale(SqlTypeName)}
+   * but return Integer.MIN_VALUE if scale is unsupported.
+   */
+  @Deprecated
   public int getDefaultScale() {
     switch (this) {
     case DECIMAL:
@@ -781,7 +791,11 @@ public enum SqlTypeName {
    * precision/length are not applicable for this type.
    *
    * @return Minimum allowed precision
+   *
+   * @deprecated
+   * Use {@link org.apache.calcite.rel.type.RelDataTypeSystem#getMinPrecision(SqlTypeName)}.
    */
+  @Deprecated
   public int getMinPrecision() {
     switch (this) {
     case DECIMAL:
@@ -817,11 +831,16 @@ public enum SqlTypeName {
 
   /**
    * Returns the minimum scale (or fractional second precision in the case of
-   * intervals) allowed for this type, or -1 if precision/length are not
+   * intervals) allowed for this type, or -1 if scale are not
    * applicable for this type.
    *
    * @return Minimum allowed scale
+   *
+   * @deprecated
+   * Use {@link org.apache.calcite.rel.type.RelDataTypeSystem#getMinScale(SqlTypeName)}
+   * but return Integer.MIN_VALUE if scale is unsupported.
    */
+  @Deprecated
   public int getMinScale() {
     switch (this) {
     // TODO: Minimum numeric scale for decimal
