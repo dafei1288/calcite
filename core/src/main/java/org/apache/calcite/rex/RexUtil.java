@@ -2470,7 +2470,8 @@ public class RexUtil {
         fieldAccess =
             new RexFieldAccess(
                 normalizedExpr,
-                fieldAccess.getField());
+                fieldAccess.getField(),
+                fieldAccess.getType());
       }
       return register(fieldAccess);
     }
@@ -2824,6 +2825,21 @@ public class RexUtil {
 
     @Override public Void visitCorrelVariable(RexCorrelVariable var) {
       throw Util.FoundOne.NULL;
+    }
+
+    @Override public Void visitSubQuery(RexSubQuery subQuery) {
+      if (!deep) {
+        return null;
+      }
+
+      for (RexNode operand : subQuery.operands) {
+        operand.accept(this);
+      }
+
+      if (!RelOptUtil.getVariablesUsed(subQuery.rel).isEmpty()) {
+        throw Util.FoundOne.NULL;
+      }
+      return null;
     }
   }
 

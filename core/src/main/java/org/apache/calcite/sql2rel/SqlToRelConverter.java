@@ -775,7 +775,7 @@ public class SqlToRelConverter {
     // Semantics example. Given the view definition
     //   CREATE VIEW v2 AS SELECT * FROM t ORDER BY x LIMIT 10
     // we would never remove the ORDER BY, because "ORDER BY ... LIMIT" is about
-    // semantics. It is not a 'pure order'.
+    // semantics. It is not a 'pure order'. Similarly "ORDER BY x OFFSET 5".
     if (RelOptUtil.isPureOrder(castNonNull(bb.root))
         && config.isRemoveSortInSubQuery()) {
       // Remove the Sort if the view is at the top level. Also remove the Sort
@@ -2246,6 +2246,7 @@ public class SqlToRelConverter {
 
   private RexNode convertOver(Blackboard bb, SqlNode node) {
     SqlCall call = (SqlCall) node;
+    bb.getValidator().deriveType(bb.scope, call);
     SqlCall aggCall = call.operand(0);
     boolean ignoreNulls = false;
     switch (aggCall.getKind()) {
@@ -3433,7 +3434,9 @@ public class SqlToRelConverter {
     final SqlNameMatcher nameMatcher = catalogReader.nameMatcher();
     final List<RexNode> list = new ArrayList<>();
     for (String name : nameList) {
-      List<RexNode> operands = new ArrayList<>();
+      // For each field joined on we compare the types from the left and right relation
+      List<RexNode> operands = new ArrayList<>(2);
+      List<RelDataType> comparedTypes = new ArrayList<>(2);
       int offset = 0;
       for (SqlValidatorNamespace n : ImmutableList.of(leftNamespace,
           rightNamespace)) {
@@ -3443,12 +3446,33 @@ public class SqlToRelConverter {
           throw new AssertionError("field " + name + " is not found in "
               + rowType + " with " + nameMatcher);
         }
+
+        comparedTypes.add(field.getType());
         operands.add(
             rexBuilder.makeInputRef(field.getType(),
                 offset + field.getIndex()));
         offset += rowType.getFieldList().size();
       }
-      list.add(rexBuilder.makeCall(SqlStdOperatorTable.EQUALS, operands));
+
+      RelDataType resultType =
+          validator().getTypeCoercion().commonTypeForBinaryComparison(
+              comparedTypes.get(0), comparedTypes.get(1));
+      if (resultType == null) {
+        // Leave call unchanged (as it happens in TypeCoercionImpl#binaryComparisonCoercion)
+        list.add(rexBuilder.makeCall(SqlStdOperatorTable.EQUALS, operands));
+      } else {
+        List<RexNode> castedOperands = new ArrayList<>();
+        for (int i = 0; i < operands.size(); i++) {
+          RexNode operand = operands.get(i);
+          RelDataType fieldType = comparedTypes.get(i);
+          RexNode expr = operand;
+          if (!fieldType.equals(resultType)) {
+            expr = rexBuilder.makeCast(resultType, operand, true, false);
+          }
+          castedOperands.add(expr);
+        }
+        list.add(rexBuilder.makeCall(SqlStdOperatorTable.EQUALS, castedOperands));
+      }
     }
     return RexUtil.composeConjunction(rexBuilder, list);
   }

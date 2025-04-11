@@ -391,9 +391,9 @@ class PigRelOpTest extends PigRelTestBase {
         + "    FROM scott.EMP\n"
         + "    WHERE JOB <> 'CLERK'\n"
         + "    GROUP BY DEPTNO, JOB) AS $cor1,\n"
-        + "  LATERAL UNNEST (SELECT $cor1.$f2 AS $f0\n"
-        + "    FROM (VALUES (0)) AS t (ZERO)) AS t3 (EMPNO, ENAME, JOB,"
-        + " MGR, HIREDATE, SAL, COMM, DEPTNO) AS t30\n"
+        + "  LATERAL UNNEST((SELECT $cor1.$f2 AS $f0\n"
+        + "      FROM (VALUES (0)) AS t (ZERO))) AS t30 (EMPNO, ENAME, JOB,"
+        + " MGR, HIREDATE, SAL, COMM, DEPTNO)\n"
         + "ORDER BY $cor1.DEPTNO, $cor1.JOB";
     pig(script).assertRel(hasTree(plan))
         .assertSql(is(sql));
@@ -479,17 +479,16 @@ class PigRelOpTest extends PigRelTestBase {
         + "HIREDATE, SAL, COMM, DEPTNO)) AS A\n"
         + "        FROM scott.EMP\n"
         + "        GROUP BY DEPTNO) AS $cor4,\n"
-        + "      LATERAL (SELECT X\n"
-        + "        FROM (SELECT 'all' AS $f0, COLLECT(ROW(ENAME, JOB, DEPTNO, SAL)) AS X\n"
-        + "            FROM UNNEST (SELECT $cor4.A AS $f0\n"
-        + "                FROM (VALUES (0)) AS t (ZERO)) "
+        + "      LATERAL (SELECT COLLECT($f1) AS X\n"
+        + "        FROM (SELECT 'all' AS $f0, ROW(ENAME, JOB, DEPTNO, SAL) AS $f1\n"
+        + "            FROM UNNEST((SELECT $cor4.A AS $f0\n"
+        + "                  FROM (VALUES (0)) AS t (ZERO))) "
         + "AS t2 (EMPNO, ENAME, JOB, MGR, HIREDATE, SAL, COMM, DEPTNO)\n"
         + "            WHERE JOB <> 'CLERK'\n"
-        + "            GROUP BY 'all'\n"
-        + "            ORDER BY SAL) AS t7) AS t8) AS $cor5,\n"
-        + "  LATERAL UNNEST (SELECT $cor5.X AS $f0\n"
-        + "    FROM (VALUES (0)) AS t (ZERO)) "
-        + "AS t11 (ENAME, JOB, DEPTNO, SAL) AS t110\n"
+        + "            ORDER BY SAL) AS t6\n"
+        + "        GROUP BY $f0) AS t8) AS $cor5,\n"
+        + "  LATERAL UNNEST((SELECT $cor5.X AS $f0\n"
+        + "      FROM (VALUES (0)) AS t (ZERO))) AS t110 (ENAME, JOB, DEPTNO, SAL)\n"
         + "ORDER BY $cor5.group";
     pig(script).assertRel(hasTree(plan))
         .assertResult(is(result))

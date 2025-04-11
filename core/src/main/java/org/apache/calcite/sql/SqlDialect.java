@@ -754,6 +754,7 @@ public class SqlDialect {
 
   public boolean supportsAggregateFunction(SqlKind kind) {
     switch (kind) {
+    case LITERAL_AGG:
     case COUNT:
     case SUM:
     case SUM0:
@@ -792,6 +793,11 @@ public class SqlDialect {
   /** Returns whether this dialect supports case when return boolean type. */
   public boolean supportBooleanCaseWhen() {
     return true;
+  }
+
+  /** Converts {@link RexNode} expression to {@link RexNode} expression before unparse. */
+  public RexNode prepareUnparse(RexNode rexNode) {
+    return rexNode;
   }
 
   /** Returns whether this dialect supports a given function or operator.
@@ -1421,6 +1427,7 @@ public class SqlDialect {
     ORACLE("Oracle", "\"", NullCollation.HIGH),
     DERBY("Apache Derby", null, NullCollation.HIGH),
     DB2("IBM DB2", null, NullCollation.HIGH),
+    DORIS("Doris", "`", NullCollation.LOW),
     EXASOL("Exasol", "\"", NullCollation.LOW),
     FIREBIRD("Firebird", null, NullCollation.HIGH),
     FIREBOLT("Firebolt", "\"", NullCollation.LOW),
@@ -1434,6 +1441,7 @@ public class SqlDialect {
     PHOENIX("Phoenix", "\"", NullCollation.HIGH),
     POSTGRESQL("PostgreSQL", "\"", NullCollation.HIGH),
     PRESTO("Presto", "\"", NullCollation.LAST),
+    TRINO("Trino", "\"", NullCollation.LAST),
     NETEZZA("Netezza", "\"", NullCollation.HIGH),
     INFOBRIGHT("Infobright", "`", NullCollation.HIGH),
     NEOVIEW("Neoview", null, NullCollation.HIGH),

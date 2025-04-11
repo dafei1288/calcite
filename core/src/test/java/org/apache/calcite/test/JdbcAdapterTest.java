@@ -16,11 +16,16 @@
  */
 package org.apache.calcite.test;
 
+import org.apache.calcite.adapter.enumerable.EnumerableRules;
+import org.apache.calcite.adapter.java.ReflectiveSchema;
 import org.apache.calcite.config.CalciteConnectionProperty;
 import org.apache.calcite.config.Lex;
+import org.apache.calcite.plan.RelOptPlanner;
+import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.test.CalciteAssert.AssertThat;
 import org.apache.calcite.test.CalciteAssert.DatabaseInstance;
 import org.apache.calcite.test.schemata.foodmart.FoodmartSchema;
+import org.apache.calcite.test.schemata.hr.HrSchema;
 import org.apache.calcite.util.Smalls;
 import org.apache.calcite.util.TestUtil;
 
@@ -35,6 +40,7 @@ import java.sql.Statement;
 import java.util.Properties;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
@@ -127,7 +133,7 @@ class JdbcAdapterTest {
             + "      JdbcFilter(condition=[<($0, 10)])\n"
             + "        JdbcTableScan(table=[[foodmart, store]])\n"
             + "  JdbcToEnumerableConverter\n"
-            + "    JdbcProject(EXPR$0=[CAST($1):VARCHAR(30)])\n"
+            + "    JdbcProject(ENAME=[CAST($1):VARCHAR(30)])\n"
             + "      JdbcFilter(condition=[>(CAST($0):INTEGER NOT NULL, 10)])\n"
             + "        JdbcTableScan(table=[[SCOTT, EMP]])")
         .runs()
@@ -135,7 +141,7 @@ class JdbcAdapterTest {
         .planHasSql("SELECT \"store_name\"\n"
                 + "FROM \"foodmart\".\"store\"\n"
                 + "WHERE \"store_id\" < 10")
-        .planHasSql("SELECT CAST(\"ENAME\" AS VARCHAR(30))\n"
+        .planHasSql("SELECT CAST(\"ENAME\" AS VARCHAR(30)) AS \"ENAME\"\n"
             + "FROM \"SCOTT\".\"EMP\"\n"
             + "WHERE CAST(\"EMPNO\" AS INTEGER) > 10");
   }
@@ -232,6 +238,32 @@ class JdbcAdapterTest {
         .planHasSql("SELECT \"ENAME\", \"EMPNO\"\n"
             + "FROM \"SCOTT\".\"EMP\"\n"
             + "ORDER BY \"EMPNO\" NULLS LAST");
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6401">[CALCITE-6401]
+   * JdbcAdapter cannot push down NOT IN sub-queries</a>. */
+  @Test void testPushDownNotIn() {
+    CalciteAssert.model(JdbcTest.SCOTT_MODEL)
+        .query("select * from dept where deptno not in (select deptno from emp)")
+        .explainContains("PLAN=JdbcToEnumerableConverter\n"
+            + "  JdbcProject(DEPTNO=[$0], DNAME=[$1], LOC=[$2])\n"
+            + "    JdbcFilter(condition=[OR(=($3, 0), AND(IS NULL($6), >=($4, $3)))])\n"
+            + "      JdbcJoin(condition=[=($0, $5)], joinType=[left])\n"
+            + "        JdbcJoin(condition=[true], joinType=[inner])\n"
+            + "          JdbcTableScan(table=[[SCOTT, DEPT]])\n"
+            + "          JdbcAggregate(group=[{}], c=[COUNT()], ck=[COUNT($7)])\n"
+            + "            JdbcTableScan(table=[[SCOTT, EMP]])\n"
+            + "        JdbcAggregate(group=[{7}], i=[LITERAL_AGG(true)])\n"
+            + "          JdbcTableScan(table=[[SCOTT, EMP]])\n\n")
+        .runs()
+        .enable(CalciteAssert.DB == CalciteAssert.DatabaseInstance.HSQLDB)
+        .planHasSql("SELECT \"DEPT\".\"DEPTNO\", \"DEPT\".\"DNAME\", \"DEPT\".\"LOC\"\n"
+            + "FROM \"SCOTT\".\"DEPT\"\nCROSS JOIN (SELECT COUNT(*) AS \"c\", COUNT(\"DEPTNO\") AS \"ck\"\n"
+            + "FROM \"SCOTT\".\"EMP\") AS \"t\"\n"
+            + "LEFT JOIN (SELECT \"DEPTNO\", TRUE AS \"i\"\n"
+            + "FROM \"SCOTT\".\"EMP\"\nGROUP BY \"DEPTNO\") AS \"t0\" ON \"DEPT\".\"DEPTNO\" = \"t0\".\"DEPTNO\"\n"
+            + "WHERE \"t\".\"c\" = 0 OR \"t0\".\"i\" IS NULL AND \"t\".\"ck\" >= \"t\".\"c\"");
   }
 
   /** Test case for
@@ -1424,6 +1456,57 @@ class JdbcAdapterTest {
             + "GROUP BY \"t2\".\"DNAME\", \"t2\".\"DNAME0\"")
         .runs();
   }
+
+  /**
+   * Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-4188">[CALCITE-4188]
+   * Support EnumerableBatchNestedLoopJoin for JDBC</a>. */
+  @Test void testBatchNestedLoopJoinPlan() {
+    final String sql = "SELECT *\n"
+        + "FROM \"s\".\"emps\" A\n"
+        + "LEFT OUTER JOIN \"foodmart\".\"store\" B ON A.\"empid\" = B.\"store_id\"";
+    final String explain = "JdbcFilter(condition=[OR(=($cor0.empid0, $0), =($cor1.empid0, $0)";
+    final String jdbcSql = "SELECT *\n"
+        + "FROM \"foodmart\".\"store\"\n"
+        + "WHERE ? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR"
+        + " (? = \"store_id\" OR ? = \"store_id\")) OR (? = \"store_id\" OR (? = \"store_id\" OR ? "
+        + "= \"store_id\") OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\"))) OR (? ="
+        + " \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\")) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\") OR (? = \"store_id\" OR ? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\")))) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = "
+        + "\"store_id\" OR (? = \"store_id\" OR ? = \"store_id\")) OR (? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\"))) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = "
+        + "\"store_id\" OR (? = \"store_id\" OR ? = \"store_id\")) OR (? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR ? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\"))))) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\") OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\")) OR (? = "
+        + "\"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\"))) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\") OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\")) OR (? = "
+        + "\"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR ? = "
+        + "\"store_id\" OR (? = \"store_id\" OR ? = \"store_id\")))) OR (? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\")) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = "
+        + "\"store_id\" OR (? = \"store_id\" OR ? = \"store_id\"))) OR (? = \"store_id\" OR (? = "
+        + "\"store_id\" OR ? = \"store_id\") OR (? = \"store_id\" OR (? = \"store_id\" OR ? = "
+        + "\"store_id\")) OR (? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\") OR (? = "
+        + "\"store_id\" OR ? = \"store_id\" OR (? = \"store_id\" OR ? = \"store_id\"))))))";
+    CalciteAssert.model(FoodmartSchema.FOODMART_MODEL)
+        .withSchema("s", new ReflectiveSchema(new HrSchema()))
+        .withHook(Hook.PLANNER, (Consumer<RelOptPlanner>) planner -> {
+          planner.addRule(EnumerableRules.ENUMERABLE_BATCH_NESTED_LOOP_JOIN_RULE);
+        })
+        .query(sql)
+        .explainContains(explain)
+        .runs()
+        .enable(CalciteAssert.DB == CalciteAssert.DatabaseInstance.HSQLDB
+            || CalciteAssert.DB == DatabaseInstance.POSTGRESQL)
+        .planHasSql(jdbcSql)
+        .returnsCount(4);
+  }
+
   /** Acquires a lock, and releases it when closed. */
   static class LockWrapper implements AutoCloseable {
     private final Lock lock;

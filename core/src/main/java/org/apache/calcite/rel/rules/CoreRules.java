@@ -16,6 +16,8 @@
  */
 package org.apache.calcite.rel.rules;
 
+import org.apache.calcite.linq4j.function.Experimental;
+import org.apache.calcite.plan.RelOptUtil.Exists;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.Calc;
@@ -293,6 +295,11 @@ public class CoreRules {
   public static final FilterTableScanRule FILTER_SCAN =
       FilterTableScanRule.Config.DEFAULT.toRule();
 
+  /** Rule that transforms a {@link Filter} on top of a {@link Sort}
+   * into a {@link Sort} on top of a {@link Filter}. */
+  public static final FilterSortTransposeRule FILTER_SORT_TRANSPOSE =
+          FilterSortTransposeRule.Config.DEFAULT.toRule();
+
   /** Rule that matches a {@link Filter} on an
    * {@link org.apache.calcite.adapter.enumerable.EnumerableInterpreter} on a
    * {@link TableScan}. */
@@ -342,11 +349,25 @@ public class CoreRules {
   public static final UnionMergeRule INTERSECT_MERGE =
       UnionMergeRule.Config.INTERSECT.toRule();
 
+  /** Planner rule that reorders inputs of an {@link Intersect} to put smaller inputs first.
+   * This helps reduce the size of intermediate results. */
+  public static final IntersectReorderRule INTERSECT_REORDER =
+      IntersectReorderRule.Config.DEFAULT.toRule();
+
   /** Rule that translates a distinct
    * {@link Intersect} into a group of operators
    * composed of {@link Union}, {@link Aggregate}, etc. */
   public static final IntersectToDistinctRule INTERSECT_TO_DISTINCT =
       IntersectToDistinctRule.Config.DEFAULT.toRule();
+
+  /** Rule that translates a {@link Intersect}
+   * into a {@link Exists} subquery. */
+  public static final IntersectToExistsRule INTERSECT_TO_EXISTS =
+      IntersectToExistsRule.Config.DEFAULT.toRule();
+
+  /** Rule to translates a {@link Intersect} to {@link Join#isSemiJoin semi-join}. */
+  public static final IntersectToSemiJoinRule INTERSECT_TO_SEMI_JOIN =
+          IntersectToSemiJoinRule.Config.DEFAULT.toRule();
 
   /** Rule that translates a distinct
    * {@link Minus} into a group of operators
@@ -816,4 +837,17 @@ public class CoreRules {
       WINDOW_REDUCE_EXPRESSIONS =
       ReduceExpressionsRule.WindowReduceExpressionsRule.WindowReduceExpressionsRuleConfig
           .DEFAULT.toRule();
+
+  /** Rule that flattens a tree of {@link LogicalJoin}s
+   * into a single {@link HyperGraph} with N inputs. */
+  @Experimental
+  public static final JoinToHyperGraphRule JOIN_TO_HYPER_GRAPH =
+      JoinToHyperGraphRule.Config.DEFAULT.toRule();
+
+  /** Rule that re-orders a {@link Join} tree using dphyp algorithm.
+   *
+   * @see #JOIN_TO_HYPER_GRAPH */
+  @Experimental
+  public static final DphypJoinReorderRule HYPER_GRAPH_OPTIMIZE =
+      DphypJoinReorderRule.Config.DEFAULT.toRule();
 }

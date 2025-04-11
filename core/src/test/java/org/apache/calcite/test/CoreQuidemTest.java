@@ -70,6 +70,16 @@ class CoreQuidemTest extends QuidemTest {
               .with(CalciteConnectionProperty.FUN, SqlLibrary.CALCITE.fun)
               .with(CalciteAssert.Config.SCOTT)
               .connect();
+        case "scott-spark":
+          discard(CustomTypeSystems.SPARK_TYPE_SYSTEM);
+          return CalciteAssert.that()
+              .with(CalciteConnectionProperty.PARSER_FACTORY,
+                  ExtensionDdlExecutor.class.getName() + "#PARSER_FACTORY")
+              .with(CalciteConnectionProperty.FUN, SqlLibrary.CALCITE.fun)
+              .with(CalciteConnectionProperty.TYPE_SYSTEM,
+                  CustomTypeSystems.class.getName() + "#SPARK_TYPE_SYSTEM")
+              .with(CalciteAssert.Config.SCOTT)
+              .connect();
         case "scott-checked-rounding-half-up":
           discard(CustomTypeSystems.ROUNDING_MODE_HALF_UP);
           return CalciteAssert.that()
@@ -130,6 +140,15 @@ class CoreQuidemTest extends QuidemTest {
                   ExtensionDdlExecutor.class.getName() + "#PARSER_FACTORY")
               .with(CalciteConnectionProperty.CONFORMANCE,
                   SqlConformanceEnum.ORACLE_10)
+              .with(CalciteAssert.Config.SCOTT)
+              .connect();
+        case "scott-mssql":
+          // Same as "scott", but uses SQL_SERVER_2008 conformance.
+          return CalciteAssert.that()
+              .with(CalciteConnectionProperty.PARSER_FACTORY,
+                  ExtensionDdlExecutor.class.getName() + "#PARSER_FACTORY")
+              .with(CalciteConnectionProperty.CONFORMANCE,
+                  SqlConformanceEnum.SQL_SERVER_2008)
               .with(CalciteAssert.Config.SCOTT)
               .connect();
         case "steelwheels":

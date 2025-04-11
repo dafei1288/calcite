@@ -34,7 +34,6 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.parser.SqlParserUtil;
 import org.apache.calcite.sql.type.SqlTypeCoercionRule;
 import org.apache.calcite.sql.type.SqlTypeFamily;
@@ -44,6 +43,7 @@ import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorNamespace;
 import org.apache.calcite.sql.validate.SqlValidatorScope;
+import org.apache.calcite.sql.validate.SqlValidatorUtil;
 import org.apache.calcite.util.Pair;
 import org.apache.calcite.util.Util;
 
@@ -212,7 +212,12 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
       return false;
     }
     RelDataType targetType3 = syncAttributes(validator.deriveType(scope, node), targetType);
-    final SqlNode node3 = castTo(node, targetType3);
+    SqlNode node3 = castTo(node, targetType3);
+    if (node.getKind() == SqlKind.IDENTIFIER) {
+      SqlIdentifier id = (SqlIdentifier) node;
+      String name = id.getComponent(id.names.size() - 1).getSimple();
+      node3 = SqlValidatorUtil.addAlias(node3, name);
+    }
     nodeList.set(index, node3);
     updateInferredType(node3, targetType3);
     return true;
@@ -307,7 +312,7 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
    * <p>Ignore constant reduction which should happen in RexSimplify.
    */
   private static SqlNode castTo(SqlNode node, RelDataType type) {
-    return SqlStdOperatorTable.CAST.createCall(SqlParserPos.ZERO, node,
+    return SqlStdOperatorTable.CAST.createCall(node.getParserPosition(), node,
         SqlTypeUtil.convertTypeToSpec(type).withNullable(type.isNullable()));
   }
 
@@ -493,6 +498,10 @@ public abstract class AbstractTypeCoercion implements TypeCoercion {
       @Nullable RelDataType type1, @Nullable RelDataType type2) {
     if (type1 == null || type2 == null) {
       return null;
+    }
+
+    if (type1.equals(type2)) {
+      return type1;
     }
 
     boolean anyNullable = type1.isNullable() || type2.isNullable();

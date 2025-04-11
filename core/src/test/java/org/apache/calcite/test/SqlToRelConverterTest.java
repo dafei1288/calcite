@@ -38,6 +38,7 @@ import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalSort;
 import org.apache.calcite.rel.logical.LogicalTableModify;
 import org.apache.calcite.rel.rules.CoreRules;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.fun.SqlLibrary;
@@ -45,6 +46,8 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlConformance;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
 import org.apache.calcite.sql.validate.SqlDelegatingConformance;
+import org.apache.calcite.sql.validate.SqlValidatorUtil;
+import org.apache.calcite.sql.validate.implicit.TypeCoercionImpl;
 import org.apache.calcite.test.catalog.MockCatalogReaderExtended;
 import org.apache.calcite.util.Bug;
 import org.apache.calcite.util.TestUtil;
@@ -254,6 +257,15 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
   @Test void testJoinOn() {
     final String sql = "SELECT * FROM emp\n"
         + "JOIN dept on emp.deptno = dept.deptno";
+    sql(sql).ok();
+  }
+
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6770">[CALCITE-6770]
+   * Preserve column names when casts are inserted in projects</a>. */
+  @Test void testCastNames() {
+    final String sql = "SELECT * FROM (SELECT empno, 'x' AS X FROM emp) "
+        + "UNION ALL (SELECT empno, 'xx' AS X from emp)";
     sql(sql).ok();
   }
 
@@ -4897,6 +4909,42 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     sql(sql).ok();
   }
 
+  /** Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6413">[CALCITE-6413]
+   * SqlValidator does not invoke TypeCoercionImpl::binaryComparisonCoercion for both NATURAL
+   * and USING join conditions</a>. */
+  @Test void testNaturalJoinCast() {
+    final String sql = "WITH t1(x) AS (VALUES('x')), t2(x) AS (VALUES(0.0))\n"
+        + "SELECT * FROM t1 NATURAL JOIN t2";
+    sql(sql).ok();
+  }
+
+  /** Test case for <a href="https://issues.apache.org/jira/browse/CALCITE-6885">[CALCITE-6885]
+   * SqlToRelConverter#convertUsing should not fail if commonTypeForBinaryComparison
+   * returns null</a>. */
+  @Test void testNaturalJoinCastNoCoercion() {
+    final String sql = "WITH t1(x) AS (VALUES('x')), t2(x) AS (VALUES(0.0))\n"
+        + "SELECT * FROM t1 NATURAL JOIN t2";
+    sql(sql)
+        // Default factory, except for the TypeCoercion
+        .withFactory(f ->
+            f
+                .withValidator((opTab, catalogReader, typeFactory, config) ->
+                    SqlValidatorUtil.newValidator(opTab, catalogReader, typeFactory,
+                        config.withIdentifierExpansion(true)
+                            // Ad-hoc coercion that returns null for commonTypeForBinaryComparison
+                            .withTypeCoercionFactory((t, v) -> new TypeCoercionImpl(t, v) {
+                              @Override public @Nullable RelDataType commonTypeForBinaryComparison(
+                                  @Nullable RelDataType type1, @Nullable RelDataType type2) {
+                                return null;
+                              }
+                            })))
+                .withSqlToRelConfig(c ->
+                    c.withTrimUnusedFields(true).withExpand(true)
+                        .addRelBuilderConfigTransform(b ->
+                            b.withAggregateUnique(true).withPruneInputOfAggregate(false))))
+        .ok();
+  }
+
   /** Tests LEFT JOIN LATERAL with multiple columns from outer. */
   @Test void testLeftJoinLateral4() {
     final String sql = "select * from (values (4,5)) as t(c,d)\n"
@@ -5177,6 +5225,22 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
     sql(sql).withConfig(c -> c.withRemoveSortInSubQuery(false)).convertsTo("${planKeepSort}");
   }
 
+  /** Test case for
+   * <a href="https://issues.apache.org/jira/browse/CALCITE-6759">[CALCITE-6759]
+   * SqlToRelConverter should not remove ORDER BY in subquery if it has an
+   * OFFSET</a>.
+   *
+   * <p>While an ORDER BY on its own can be ignored, an ORDER BY with an OFFSET
+   * or FETCH cannot be removed from the subquery without changing the
+   * semantics. */
+  @Test void testSortWithOffsetInSubQuery() {
+    final String sql = "select count(*) from (\n"
+        + "  select *\n"
+        + "  from emp\n"
+        + "  order by empno offset 10)";
+    sql(sql).ok();
+  }
+
   @Test void testTrimUnionAll() {
     final String sql = ""
         + "select deptno from\n"
@@ -5350,6 +5414,17 @@ class SqlToRelConverterTest extends SqlToRelTestBase {
         .withFactory(t ->
             t.withValidatorConfig(config ->
                 config.withIdentifierExpansion(false)))
+        .withTrim(false)
+        .ok();
+  }
+
+  @Test void testNestedWindowAggWithIdentifierExpansionDisabled() {
+    String sql = "select sum(sum(sal)) over() from emp";
+    sql(sql)
+        .withFactory(f ->
+            f.withValidator((opTab, catalogReader, typeFactory, config)
+                -> SqlValidatorUtil.newValidator(opTab, catalogReader,
+                typeFactory, config.withIdentifierExpansion(false))))
         .withTrim(false)
         .ok();
   }

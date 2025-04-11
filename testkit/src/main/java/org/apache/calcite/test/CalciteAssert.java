@@ -569,6 +569,13 @@ public class CalciteAssert {
       try {
         if (updateChecker == null) {
           resultSet = statement.executeQuery(sql);
+          if (resultChecker == null && exceptionChecker != null) {
+            // Pull data from result set, otherwise exceptions that happen during evaluation
+            // won't be triggered
+            while (resultSet.next()) {
+              // no need to do anything with the data
+            }
+          }
         } else {
           updateCount = statement.executeUpdate(sql);
         }
@@ -1021,7 +1028,7 @@ public class CalciteAssert {
       // FOODMART, and this allows statistics queries to be executed.
       foodmart = addSchemaIfNotExists(rootSchema, SchemaSpec.JDBC_FOODMART);
       final Wrapper salesTable =
-          requireNonNull((Wrapper) foodmart.getTable("sales_fact_1997"));
+          requireNonNull((Wrapper) foodmart.tables().get("sales_fact_1997"));
       SchemaPlus fake =
           rootSchema.add(schema.schemaName, new AbstractSchema());
       fake.add("time_by_day", new AbstractTable() {
@@ -1094,7 +1101,7 @@ public class CalciteAssert {
 
   private static SchemaPlus addSchemaIfNotExists(SchemaPlus rootSchema,
         SchemaSpec schemaSpec) {
-    final SchemaPlus schema = rootSchema.getSubSchema(schemaSpec.schemaName);
+    final SchemaPlus schema = rootSchema.subSchemas().get(schemaSpec.schemaName);
     if (schema != null) {
       return schema;
     }
@@ -2292,11 +2299,11 @@ public class CalciteAssert {
       }
     };
 
-    @Override public Table getTable(String name) {
+    @Deprecated @Override public Table getTable(String name) {
       return table;
     }
 
-    @Override public Set<String> getTableNames() {
+    @Deprecated @Override public Set<String> getTableNames() {
       return ImmutableSet.of("myTable");
     }
 
@@ -2317,11 +2324,11 @@ public class CalciteAssert {
       return ImmutableSet.of();
     }
 
-    @Override public @Nullable Schema getSubSchema(String name) {
+    @Deprecated @Override public @Nullable Schema getSubSchema(String name) {
       return null;
     }
 
-    @Override public Set<String> getSubSchemaNames() {
+    @Deprecated @Override public Set<String> getSubSchemaNames() {
       return ImmutableSet.of();
     }
 

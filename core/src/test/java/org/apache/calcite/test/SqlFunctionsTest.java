@@ -63,6 +63,7 @@ import static org.apache.calcite.runtime.SqlFunctions.ltrim;
 import static org.apache.calcite.runtime.SqlFunctions.md5;
 import static org.apache.calcite.runtime.SqlFunctions.overlay;
 import static org.apache.calcite.runtime.SqlFunctions.position;
+import static org.apache.calcite.runtime.SqlFunctions.replace;
 import static org.apache.calcite.runtime.SqlFunctions.rtrim;
 import static org.apache.calcite.runtime.SqlFunctions.sha1;
 import static org.apache.calcite.runtime.SqlFunctions.sha256;
@@ -558,6 +559,18 @@ class SqlFunctionsTest {
     }
   }
 
+  @Test void testReplace() {
+    assertThat(replace("", "ciao", "ci", true), is(""));
+    assertThat(replace("ciao", "ciao", "", true), is(""));
+    assertThat(replace("ciao", "", "ciao", true), is("ciao"));
+    assertThat(replace("ci ao", " ", "ciao", true), is("ciciaoao"));
+    assertThat(replace("ciAao", "a", "ciao", true), is("ciAciaoo"));
+    assertThat(replace("ciAao", "A", "ciao", true), is("ciciaoao"));
+    assertThat(replace("ciAao", "a", "ciao", false), is("ciciaociaoo"));
+    assertThat(replace("ciAao", "A", "ciao", false), is("ciciaociaoo"));
+    assertThat(replace("hello world", "o", "", true), is("hell wrld"));
+  }
+
   @Test void testRegexpReplace() {
     final SqlFunctions.RegexFunction f = new SqlFunctions.RegexFunction();
     assertThat(f.regexpReplace("abc", "b"), is("ac"));
@@ -584,6 +597,9 @@ class SqlFunctionsTest {
         is("X X GHI"));
     assertThat(f.regexpReplacePg("ABC def GHI", "[a-z]+", "X", "i"),
         is("X def GHI"));
+    assertThat(f.regexpReplacePg("", "[a-z]+", "X", "i"), is(""));
+    assertThat(f.regexpReplace("", "[a-z]+", "X", 1, 1, "i"), is(""));
+
 
     try {
       f.regexpReplace("abc def ghi", "[a-z]+", "X", 0);
@@ -600,6 +616,13 @@ class SqlFunctionsTest {
       assertThat(e.getMessage(),
           is("Invalid input for REGEXP_REPLACE: 'WWW'"));
     }
+
+    assertThat(f.regexpReplacePg("abc", "a(.*)c", "x\\1x", "i"),
+        is("xbx"));
+    assertThat(f.regexpReplace("abc", "a(.*)c", "x$1x"),
+        is("xbx"));
+    assertThat(f.regexpReplace("abc", "a(.*)c", "x\\1x"),
+        is("x1x"));
   }
 
   @Test void testReplaceNonDollarIndexedString() {

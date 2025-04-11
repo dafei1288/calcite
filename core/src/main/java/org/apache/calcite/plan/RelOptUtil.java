@@ -94,6 +94,7 @@ import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.MultisetSqlType;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.ImmutableBitSet;
@@ -189,10 +190,10 @@ public abstract class RelOptUtil {
   }
 
   /**
-   * Whether this node is a sort without limit specification.
+   * Whether this node is a sort with neither limit nor offset specification.
    */
   public static boolean isPureOrder(RelNode rel) {
-    return !isLimit(rel) && isOrder(rel);
+    return !isLimit(rel) && !isOffset(rel) && isOrder(rel);
   }
 
   /**
@@ -210,7 +211,7 @@ public abstract class RelOptUtil {
   }
 
   /**
-   * Whether this node contains a offset specification.
+   * Whether this node contains an offset specification.
    */
   public static boolean isOffset(RelNode rel) {
     return (rel instanceof Sort) && ((Sort) rel).offset != null;
@@ -1747,32 +1748,35 @@ public abstract class RelOptUtil {
    * and
    * {@link #splitJoinCondition(List, List, RexNode, List, List, List, List)}.
    *
-   * <p>If the given expr <code>call</code> is an expanded version of
+   * <p>If the given expr <code>rexCall</code> contains an expanded version of
    * {@code IS NOT DISTINCT FROM} function call, collapses it and return a
    * {@code IS NOT DISTINCT FROM} function call.
    *
    * <p>For example: {@code t1.key IS NOT DISTINCT FROM t2.key}
-   * can rewritten in expanded form as
+   * can be rewritten in expanded form as
    * {@code t1.key = t2.key OR (t1.key IS NULL AND t2.key IS NULL)}.
    *
-   * @param call       Function expression to try collapsing
+   * @param rexCall       Function expression to try collapsing
    * @param rexBuilder {@link RexBuilder} instance to create new {@link RexCall} instances.
-   * @return If the given function is an expanded IS NOT DISTINCT FROM function call,
-   *         return a IS NOT DISTINCT FROM function call. Otherwise return the input
-   *         function call as it is.
+   * @return A function where all IS NOT DISTINCT FROM are collapsed.
    */
-  public static RexCall collapseExpandedIsNotDistinctFromExpr(final RexCall call,
+  public static RexCall collapseExpandedIsNotDistinctFromExpr(final RexCall rexCall,
       final RexBuilder rexBuilder) {
-    switch (call.getKind()) {
-    case OR:
-      return doCollapseExpandedIsNotDistinctFromOrExpr(call, rexBuilder);
+    final RexShuttle shuttle = new RexShuttle() {
+      @Override public RexNode visitCall(RexCall call) {
+        RexCall recursivelyExpanded = (RexCall) super.visitCall(call);
 
-    case CASE:
-      return doCollapseExpandedIsNotDistinctFromCaseExpr(call, rexBuilder);
-
-    default:
-      return call;
-    }
+        switch (recursivelyExpanded.getKind()) {
+        case OR:
+          return doCollapseExpandedIsNotDistinctFromOrExpr(recursivelyExpanded, rexBuilder);
+        case CASE:
+          return doCollapseExpandedIsNotDistinctFromCaseExpr(recursivelyExpanded, rexBuilder);
+        default:
+          return recursivelyExpanded;
+        }
+      }
+    };
+    return (RexCall) rexCall.accept(shuttle);
   }
 
   private static RexCall doCollapseExpandedIsNotDistinctFromOrExpr(final RexCall call,
@@ -2223,6 +2227,45 @@ public abstract class RelOptUtil {
   }
 
   /**
+   * Returns whether two types are equal, perhaps ignoring nullability.
+   *
+   * @param ignoreNullability If true the types must be equal ignoring the (top-level) nullability.
+   * @param desc1 Description of first type
+   * @param type1 First type
+   * @param desc2 Description of second type
+   * @param type2 Second type
+   * @param litmus What to do if an error is detected (types are not equal)
+   * @return Whether the types are equal
+   */
+  public static boolean eqUpToNullability(
+      boolean ignoreNullability,
+      final String desc1,
+      RelDataType type1,
+      final String desc2,
+      RelDataType type2,
+      Litmus litmus) {
+    // if any one of the types is ANY return true
+    if (type1.getSqlTypeName() == SqlTypeName.ANY
+        || type2.getSqlTypeName() == SqlTypeName.ANY) {
+      return litmus.succeed();
+    }
+
+    boolean success;
+    if (ignoreNullability) {
+      success = SqlTypeUtil.equalSansNullability(type1, type2);
+    } else {
+      success = type1.equals(type2);
+    }
+
+    if (!success) {
+      return litmus.fail("type mismatch:\n{}:\n{}\n{}:\n{}",
+          desc1, type1.getFullTypeString(),
+          desc2, type2.getFullTypeString());
+    }
+    return litmus.succeed();
+  }
+
+  /**
    * Returns whether two types are equal using
    * {@link #areRowTypesEqual(RelDataType, RelDataType, boolean)}. Both types
    * must not be null.
@@ -2400,19 +2443,31 @@ public abstract class RelOptUtil {
   }
 
   /**
+   * Converts a relational expression to a string, showing just basic
+   * attributes, and doesn't expand detail info for {@code rel}.
+   */
+  public static String toString(
+      final RelNode rel,
+      SqlExplainLevel detailLevel) {
+    return toString(rel, detailLevel, false);
+  }
+
+  /**
    * Converts a relational expression to a string;
-   * returns null if and only if {@code rel} is null.
+   * returns null if and only if {@code rel} is null,
+   * returns expanded detail info for {@code rel} if {@code expand} is true.
    */
   public static @PolyNull String toString(
       final @PolyNull RelNode rel,
-      SqlExplainLevel detailLevel) {
+      SqlExplainLevel detailLevel,
+      boolean expand) {
     if (rel == null) {
       return null;
     }
     final StringWriter sw = new StringWriter();
     final RelWriter planWriter =
         new RelWriterImpl(
-            new PrintWriter(sw), detailLevel, false);
+            new PrintWriter(sw), detailLevel, false, expand);
     rel.explain(planWriter);
     return sw.toString();
   }
